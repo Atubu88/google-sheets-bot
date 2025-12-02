@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -33,6 +34,7 @@ def build_dependencies() -> dict[str, object]:
 async def main() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
+    product_service = deps["product_service"]
 
     bot = Bot(
         token=settings.bot_token,
@@ -43,13 +45,25 @@ async def main() -> None:
 
     # DI middleware
     dp.update.middleware(DependencyMiddleware(
-        product_service=deps["product_service"]
+        product_service=product_service
     ))
 
     dp.include_router(start.router)
 
+    logger.info("Starting background cache updater")
+    cache_task = asyncio.create_task(
+        product_service.background_updater(
+            settings.cache_update_interval_minutes
+        )
+    )
+
     logger.info("Starting bot")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        cache_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cache_task
 
 
 if __name__ == "__main__":

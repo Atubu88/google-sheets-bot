@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     service_account_file: Path = Field(
         Path("service_account.json"), validation_alias="GOOGLE_SERVICE_ACCOUNT_FILE"
     )
+    cache_update_interval_minutes: int = Field(
+        5, validation_alias="CACHE_UPDATE_INTERVAL_MINUTES"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
