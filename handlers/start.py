@@ -5,24 +5,33 @@ from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
-from services.product_service import ProductService
+from services.product_service import ProductService, Product
 
 router = Router()
 
 
-async def _send_product_card(message: Message, service: ProductService) -> None:
-    product = await service.get_first_product()
-    if not product:
-        await message.answer("Пока нет доступных товаров. Загляните позже!")
-        return
+async def _send_product_card(message: Message, product: Product) -> None:
+    """Send a single product card."""
+    caption = (
+        f"<b>{product.name}</b>\n"
+        f"{product.description}\n\n"
+        f"Цена: {product.price}"
+    )
 
-    caption = f"<b>{product.name}</b>\n{product.description}\n\nЦена: {product.price}"
     await message.answer_photo(photo=product.photo_url, caption=caption)
 
 
 @router.message(CommandStart())
-async def start_handler(message: Message) -> None:
-    """Entry point for new users."""
+async def start_handler(message: Message, product_service: ProductService) -> None:
+    """Entry point for new users with dependency injection."""
 
-    product_service: ProductService = message.bot["product_service"]
-    await _send_product_card(message, product_service)
+    # Загружаем 3 товара
+    products = await product_service.get_products(limit=3)
+
+    if not products:
+        await message.answer("Пока нет доступных товаров. Загляните позже!")
+        return
+
+    # Отправляем товары один за другим
+    for product in products:
+        await _send_product_card(message, product)
