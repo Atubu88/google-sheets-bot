@@ -1,8 +1,11 @@
-"""Business logic for working with products."""
+"""Business logic for working with products and caching layer."""
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
-from typing import Optional, List
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from .sheets_client import SheetRow, SheetsClient
 
@@ -17,25 +20,86 @@ class Product:
 
 
 class ProductService:
-    """High-level API for product operations."""
+    """High-level API for product operations with in-memory caching."""
 
     def __init__(self, sheets_client: SheetsClient):
         self._sheets_client = sheets_client
+        self._cache: list[Product] = []
+        self._last_updated: datetime | None = None
+        self._update_lock = asyncio.Lock()
+        self._logger = logging.getLogger(self.__class__.__name__)
+
+    @property
+    def last_updated(self) -> datetime | None:
+        """Return the UTC datetime of the last successful cache refresh."""
+
+        return self._last_updated
 
     async def get_first_product(self) -> Optional[Product]:
         """Return the first available product or ``None`` if the sheet is empty."""
-        rows = await self._sheets_client.fetch_rows()
-        if not rows:
-            return None
-        return self._map_row_to_product(rows[0])
+
+        products = await self.get_products(limit=1)
+        return products[0] if products else None
 
     async def get_products(self, limit: int = 3) -> List[Product]:
+        """Return first N products from the cached dataset."""
+
+        if not self._cache:
+            await self.update_cache()
+        return self._cache[:limit]
+
+    async def update_cache(self) -> None:
+        """Refresh the in-memory cache from Google Sheets."""
+
+        async with self._update_lock:
+            try:
+                rows = await self._sheets_client.fetch_rows()
+                self._cache = [self._map_row_to_product(row) for row in rows]
+                self._last_updated = datetime.now(timezone.utc)
+                self._logger.info(
+                    "Product cache refreshed: %s items at %s",
+                    len(self._cache),
+                    self._last_updated.isoformat(),
+                )
+            except Exception:
+                self._logger.exception("Failed to refresh product cache")
+                raise
+
+    async def background_updater(
+        self,
+        interval_minutes: int,
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
         """
-        Return first N products from Google Sheets.
+        Periodically refresh the cache, restarting on failures.
+
+        Args:
+            interval_minutes: Interval between updates.
+            stop_event: Optional event to signal graceful shutdown.
         """
-        rows = await self._sheets_client.fetch_rows()
-        rows = rows[:limit]  # ограничение по количеству
-        return [self._map_row_to_product(row) for row in rows]
+
+        wait_seconds = max(interval_minutes, 1) * 60
+
+        while True:
+            try:
+                await self.update_cache()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._logger.exception("Background updater iteration failed")
+
+            try:
+                if stop_event is not None:
+                    await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
+                    self._logger.info("Stopping background cache updater")
+                    return
+                await asyncio.sleep(wait_seconds)
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
+                # Normal path when timeout expires; continue to next iteration.
+                continue
 
     def _map_row_to_product(self, row: SheetRow) -> Product:
         return Product(
