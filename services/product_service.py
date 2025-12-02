@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 from .sheets_client import SheetRow, SheetsClient
 
@@ -24,11 +24,18 @@ class ProductService:
 
     async def get_first_product(self) -> Optional[Product]:
         """Return the first available product or ``None`` if the sheet is empty."""
-
         rows = await self._sheets_client.fetch_rows()
         if not rows:
             return None
         return self._map_row_to_product(rows[0])
+
+    async def get_products(self, limit: int = 3) -> List[Product]:
+        """
+        Return first N products from Google Sheets.
+        """
+        rows = await self._sheets_client.fetch_rows()
+        rows = rows[:limit]  # ограничение по количеству
+        return [self._map_row_to_product(row) for row in rows]
 
     def _map_row_to_product(self, row: SheetRow) -> Product:
         return Product(

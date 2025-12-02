@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -12,6 +13,7 @@ from config import get_settings
 from handlers import start
 from services.product_service import ProductService
 from services.sheets_client import SheetsClient
+from middlewares.deps import DependencyMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,11 +34,17 @@ async def main() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
 
-    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Inject dependencies into bot context for handlers.
-    bot["product_service"] = deps["product_service"]
+    # DI middleware
+    dp.update.middleware(DependencyMiddleware(
+        product_service=deps["product_service"]
+    ))
 
     dp.include_router(start.router)
 
