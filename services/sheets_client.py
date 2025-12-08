@@ -42,7 +42,7 @@ class SheetsClient:
 
     def _build_client(self) -> gspread.Client:
         scopes = [
-            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive.readonly",
         ]
         credentials = Credentials.from_service_account_file(
@@ -56,13 +56,31 @@ class SheetsClient:
         spreadsheet = await asyncio.to_thread(self._client.open_by_key, self._spreadsheet_id)
         return await asyncio.to_thread(spreadsheet.worksheet, self._worksheet_name)
 
-    async def fetch_rows(self) -> List[SheetRow]:
-        """Fetch all rows (excluding header) from the worksheet."""
+    async def fetch_raw_rows(self, *, skip_header: bool = True) -> list[list[str]]:
+        """Fetch raw rows from the worksheet.
+
+        Args:
+            skip_header: Whether to exclude the first header row from the
+                returned dataset.
+        """
 
         worksheet = await self._get_worksheet()
         raw_rows: list[list[str]] = await asyncio.to_thread(worksheet.get_all_values)
         if not raw_rows:
             return []
-        # Skip the header row
-        data_rows = raw_rows[1:]
+
+        if skip_header:
+            return raw_rows[1:]
+        return raw_rows
+
+    async def append_row(self, values: Sequence[str]) -> None:
+        """Append a row to the worksheet."""
+
+        worksheet = await self._get_worksheet()
+        await asyncio.to_thread(worksheet.append_row, list(values))
+
+    async def fetch_rows(self) -> List[SheetRow]:
+        """Fetch all rows (excluding header) from the worksheet."""
+
+        data_rows = await self.fetch_raw_rows(skip_header=True)
         return [SheetRow.from_sequence(row) for row in data_rows]
