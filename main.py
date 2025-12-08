@@ -14,6 +14,7 @@ from config import get_settings
 from handlers import start
 from services.product_service import ProductService
 from services.sheets_client import SheetsClient
+from services.user_service import UserService
 from middlewares.deps import DependencyMiddleware
 
 logging.basicConfig(level=logging.INFO)
@@ -22,19 +23,31 @@ logger = logging.getLogger(__name__)
 
 def build_dependencies() -> dict[str, object]:
     settings = get_settings()
-    sheets_client = SheetsClient(
+    product_sheets_client = SheetsClient(
         service_account_file=settings.service_account_file,
         spreadsheet_id=settings.spreadsheet_id,
         worksheet_name=settings.worksheet_name,
     )
-    product_service = ProductService(sheets_client)
-    return {"settings": settings, "product_service": product_service}
+    user_sheets_client = SheetsClient(
+        service_account_file=settings.service_account_file,
+        spreadsheet_id=settings.spreadsheet_id,
+        worksheet_name=settings.users_worksheet,
+    )
+
+    product_service = ProductService(product_sheets_client)
+    user_service = UserService(user_sheets_client)
+    return {
+        "settings": settings,
+        "product_service": product_service,
+        "user_service": user_service,
+    }
 
 
 async def main() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
     product_service = deps["product_service"]
+    user_service = deps["user_service"]
 
     bot = Bot(
         token=settings.bot_token,
@@ -45,7 +58,8 @@ async def main() -> None:
 
     # DI middleware
     dp.update.middleware(DependencyMiddleware(
-        product_service=product_service
+        product_service=product_service,
+        user_service=user_service
     ))
 
     dp.include_router(start.router)
