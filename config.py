@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     bot_token: str = Field(..., validation_alias="BOT_TOKEN")
     spreadsheet_id: str = Field(..., validation_alias="GOOGLE_SHEETS_ID")
-    worksheet_name: str = Field("Products", validation_alias="GOOGLE_SHEET_NAME")
+    worksheet_name: str = Field("products", validation_alias="GOOGLE_SHEET_NAME")
     users_worksheet: str = Field("users", validation_alias="GOOGLE_USERS_SHEET")
     service_account_file: Path = Field(
         Path("service_account.json"), validation_alias="GOOGLE_SERVICE_ACCOUNT_FILE"
