@@ -38,6 +38,8 @@ async def start_handler(
     """Entry point for new users with dependency injection."""
 
     user = message.from_user
+
+    # --- Фоновая запись пользователя в Google ---
     if user is not None:
         asyncio.create_task(
             user_service.ensure_user_record(
@@ -49,21 +51,34 @@ async def start_handler(
             )
         )
 
+    # --- Определяем имя для приветствия ---
+    if user:
+        name = user.first_name or (f"@{user.username}" if user.username else "")
+    else:
+        name = ""
+
+    name_part = f", {name}" if name else ""
+
+    # --- Мгновенное приветствие ---
     await message.answer(
-        """
-👋 Добро пожаловать!
+        f"""
+👋 Добро пожаловать{name_part}!
 Мы подготовили для вас лучшие акции сегодня.
 Выберите товар ниже и оформите заказ в несколько кликов ⬇️
         """.strip()
     )
 
+    # --- Получаем товары ---
     products = await product_service.get_products(limit=3)
 
     if not products:
         await message.answer("Пока нет доступных товаров. Загляните позже!")
         return
 
-    await asyncio.sleep(1)
+    # --- Задержка перед показом товаров ---
+    await asyncio.sleep(1.5)
 
+    # --- Отправка карточек товаров ---
     for product in products:
         await _send_product_card(message, product)
+
