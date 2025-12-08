@@ -1,6 +1,7 @@
 """Handlers related to the /start command."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from aiogram import Router
@@ -38,12 +39,14 @@ async def start_handler(
 
     user = message.from_user
     if user is not None:
-        await user_service.ensure_user_record(
-            user_id=user.id,
-            chat_id=message.chat.id,
-            username=user.username,
-            first_name=user.first_name,
-            created_at=datetime.now(timezone.utc),
+        asyncio.create_task(
+            user_service.ensure_user_record(
+                user_id=user.id,
+                chat_id=message.chat.id,
+                username=user.username,
+                first_name=user.first_name,
+                created_at=datetime.now(timezone.utc),
+            )
         )
 
     await message.answer(
@@ -59,6 +62,8 @@ async def start_handler(
     if not products:
         await message.answer("Пока нет доступных товаров. Загляните позже!")
         return
+
+    await asyncio.sleep(1)
 
     for product in products:
         await _send_product_card(message, product)
