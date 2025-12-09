@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     spreadsheet_id: str = Field(..., validation_alias="GOOGLE_SHEETS_ID")
     worksheet_name: str = Field("products", validation_alias="GOOGLE_SHEET_NAME")
     users_worksheet: str = Field("users", validation_alias="GOOGLE_USERS_SHEET")
+    orders_worksheet: str = Field("orders", validation_alias="GOOGLE_ORDERS_SHEET")
     service_account_file: Path = Field(
         Path("service_account.json"), validation_alias="GOOGLE_SERVICE_ACCOUNT_FILE"
     )
