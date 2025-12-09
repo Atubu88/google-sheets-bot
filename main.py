@@ -12,6 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import get_settings
 from handlers import start
+from handlers import buy
 from services.product_service import ProductService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
@@ -63,6 +64,7 @@ async def main() -> None:
     ))
 
     dp.include_router(start.router)
+    dp.include_router(buy.router)
 
     logger.info("Starting background cache updater")
     cache_task = asyncio.create_task(

@@ -9,13 +9,14 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from handlers.buy import remember_product_card, reset_product_cards
 from services.product_service import ProductService, Product
 from services.user_service import UserService
 
 router = Router()
 
 
-async def _send_product_card(message: Message, product: Product) -> None:
+async def _send_product_card(message: Message, product: Product) -> Message:
     """Send a single product card."""
     caption = (
         f"<b>{product.name}</b>\n"
@@ -26,9 +27,11 @@ async def _send_product_card(message: Message, product: Product) -> None:
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Купить", callback_data=f"buy:{product.id}")
 
-    await message.answer_photo(
+    sent_message = await message.answer_photo(
         photo=product.photo_url, caption=caption, reply_markup=keyboard.as_markup()
     )
+
+    return sent_message
 
 
 @router.message(CommandStart())
@@ -69,7 +72,7 @@ async def start_handler(
     )
 
     # --- Получаем товары ---
-    products = await product_service.get_products(limit=3)
+    products = await product_service.get_products(limit=5)
 
     if not products:
         await message.answer("Пока нет доступных товаров. Загляните позже!")
@@ -79,6 +82,9 @@ async def start_handler(
     await asyncio.sleep(1.5)
 
     # --- Отправка карточек товаров ---
+    reset_product_cards(message.chat.id)
+
     for product in products:
-        await _send_product_card(message, product)
+        sent_message = await _send_product_card(message, product)
+        remember_product_card(message.chat.id, product, sent_message.message_id)
 
