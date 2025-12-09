@@ -11,11 +11,10 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from handlers.buy import _product_cards, cancel_order_callback
+from handlers.buy import cancel_order_callback, get_selected_product
 from services.order_service import OrderService
 from services.product_service import ProductService
 
@@ -30,13 +29,6 @@ class OrderState(StatesGroup):
     waiting_for_city = State()
     waiting_for_branch = State()
     waiting_for_confirmation = State()
-
-
-def _find_product(chat_id: int, message_id: int):
-    for card in _product_cards.get(chat_id, []):
-        if card.message_id == message_id:
-            return card.product
-    return None
 
 
 def _phone_keyboard() -> InlineKeyboardMarkup:
@@ -74,23 +66,24 @@ def _confirmation_keyboard() -> InlineKeyboardMarkup:
 
 
 async def _prompt_phone(callback_query: CallbackQuery, product_name: str) -> None:
-    await callback_query.message.bot.edit_message_caption(
+    await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=callback_query.message.message_id,
-        caption=(
+        text=(
             f"Вы выбрали: <b>{product_name}</b>.\n\n"
             "📞 Укажите номер телефона для связи."
         ),
         reply_markup=_phone_keyboard(),
+        parse_mode="HTML",
     )
 
 
 async def _prompt_branch(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_branch)
-    await message.bot.edit_message_caption(
+    await message.bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        caption="📦 Укажите отделение или адрес для доставки.",
+        text="📦 Укажите отделение или адрес для доставки.",
         reply_markup=_branch_keyboard(),
     )
 
@@ -108,11 +101,12 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
         f"Отделение: {data['branch']}"
     )
 
-    await message.bot.edit_message_caption(
+    await message.bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=data["message_id"],
-        caption=summary,
+        text=summary,
         reply_markup=_confirmation_keyboard(),
+        parse_mode="HTML",
     )
 
 
@@ -124,7 +118,7 @@ async def confirm_order_callback(
         return
 
     chat_id = callback_query.message.chat.id
-    product = _find_product(chat_id, callback_query.message.message_id)
+    product = get_selected_product(chat_id, callback_query.message.message_id)
     if product is None:
         await callback_query.answer("Товар не найден", show_alert=True)
         return
@@ -170,7 +164,6 @@ async def manual_phone_callback(callback_query: CallbackQuery) -> None:
 async def phone_contact_handler(message: Message, state: FSMContext) -> None:
     phone = message.contact.phone_number
     await state.update_data(phone=phone)
-    await message.answer("Принял номер. Продолжим!", reply_markup=ReplyKeyboardRemove())
 
     await state.update_data(city=None, branch=None)
     await _prompt_city_from_message(message, state)
@@ -191,10 +184,10 @@ async def _prompt_city_from_message(message: Message, state: FSMContext) -> None
     await state.set_state(OrderState.waiting_for_city)
     data = await state.get_data()
 
-    await message.bot.edit_message_caption(
+    await message.bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=data["message_id"],
-        caption="🏙️ Введите город доставки.",
+        text="🏙️ Введите город доставки.",
         reply_markup=_city_keyboard(),
     )
 
@@ -204,14 +197,15 @@ async def back_to_phone_callback(callback_query: CallbackQuery, state: FSMContex
     await state.set_state(OrderState.waiting_for_phone)
     data = await state.get_data()
 
-    await callback_query.message.bot.edit_message_caption(
+    await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=data.get("message_id", callback_query.message.message_id),
-        caption=(
+        text=(
             f"Вы выбрали: <b>{data.get('product_name', '')}</b>.\n\n"
             "📞 Укажите номер телефона для связи."
         ),
         reply_markup=_phone_keyboard(),
+        parse_mode="HTML",
     )
     await callback_query.answer()
 
@@ -231,10 +225,10 @@ async def city_handler(message: Message, state: FSMContext) -> None:
 async def back_to_city_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_city)
 
-    await callback_query.message.bot.edit_message_caption(
+    await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        caption="🏙️ Введите город доставки.",
+        text="🏙️ Введите город доставки.",
         reply_markup=_city_keyboard(),
     )
     await callback_query.answer()
@@ -255,10 +249,10 @@ async def branch_handler(message: Message, state: FSMContext) -> None:
 async def back_to_branch_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_branch)
 
-    await callback_query.message.bot.edit_message_caption(
+    await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        caption="📦 Укажите отделение или адрес для доставки.",
+        text="📦 Укажите отделение или адрес для доставки.",
         reply_markup=_branch_keyboard(),
     )
     await callback_query.answer()
