@@ -337,7 +337,7 @@ async def submit_order_callback(
                 order_id=crm_order_id,
                 country="UA",
                 site="telegram-bot",
-                buyer_name=user.full_name,
+                buyer_name = user.full_name or user.first_name or user.username or "Telegram User",
                 phone=phone,
                 comment="Order from Telegram bot",
                 product_id=product_id,
