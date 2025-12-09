@@ -1,6 +1,8 @@
 """Order flow handlers for collecting delivery details."""
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,9 +19,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.buy import cancel_order_callback, get_selected_product
 from services.order_service import OrderService
 from services.product_service import ProductService
+from services.crm_client import LPCRMClient
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 class OrderState(StatesGroup):
@@ -300,24 +304,47 @@ async def submit_order_callback(
     state: FSMContext,
     order_service: OrderService,
     product_service: ProductService,
+    crm_client: LPCRMClient,
 ) -> None:
 
     data = await state.get_data()
 
     user = callback_query.from_user
 
+    product_id = data.get("product_id", "")
+    product_price = data.get("product_price", "")
+    phone = data.get("phone", "")
+    city = data.get("city", "")
+    branch = data.get("branch", "")
+
     await order_service.append_order(
         user_id=user.id if user else None,
         chat_id=callback_query.message.chat.id if callback_query.message else 0,
         username=user.username if user else "",
         first_name=user.first_name if user else "",
-        product_id=data.get("product_id", ""),
+        product_id=product_id,
         product_name=data.get("product_name", ""),
-        product_price=data.get("product_price", ""),
-        phone=data.get("phone", ""),
-        city=data.get("city", ""),
-        branch=data.get("branch", ""),
+        product_price=product_price,
+        phone=phone,
+        city=city,
+        branch=branch,
     )
+
+    if user:
+        crm_order_id = f"{product_id}-{user.id}"
+        try:
+            await crm_client.send_order(
+                order_id=crm_order_id,
+                country="UA",
+                site="telegram-bot",
+                buyer_name=user.full_name,
+                phone=phone,
+                comment="Order from Telegram bot",
+                product_id=product_id,
+                price=product_price,
+            )
+        except Exception:
+            logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
 
     await callback_query.message.answer(
         "✅ Заказ оформлен! Мы свяжемся с вами для подтверждения."
