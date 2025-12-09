@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     cache_update_interval_minutes: int = Field(
         5, validation_alias="CACHE_UPDATE_INTERVAL_MINUTES"
     )
+    crm_api_key: str = Field(..., validation_alias="CRM_API_KEY")
+    crm_base_url: str = Field(
+        "http://pureday.lp-crm.biz", validation_alias="CRM_API_BASE_URL"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
