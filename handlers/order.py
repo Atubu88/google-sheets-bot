@@ -87,10 +87,10 @@ async def _prompt_phone(callback_query: CallbackQuery, product_name: str) -> Non
 
 async def _prompt_branch(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_branch)
-    await message.bot.edit_message_text(
+    await message.bot.edit_message_caption(
         chat_id=message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        text="📦 Укажите отделение или адрес для доставки.",
+        caption="📦 Укажите отделение или адрес для доставки.",
         reply_markup=_branch_keyboard(),
     )
 
@@ -108,10 +108,10 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
         f"Отделение: {data['branch']}"
     )
 
-    await message.bot.edit_message_text(
+    await message.bot.edit_message_caption(
         chat_id=message.chat.id,
         message_id=data["message_id"],
-        text=summary,
+        caption=summary,
         reply_markup=_confirmation_keyboard(),
     )
 
@@ -190,10 +190,11 @@ async def phone_text_handler(message: Message, state: FSMContext) -> None:
 async def _prompt_city_from_message(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_city)
     data = await state.get_data()
-    await message.bot.edit_message_text(
+
+    await message.bot.edit_message_caption(
         chat_id=message.chat.id,
         message_id=data["message_id"],
-        text="🏙️ Введите город доставки.",
+        caption="🏙️ Введите город доставки.",
         reply_markup=_city_keyboard(),
     )
 
@@ -202,6 +203,7 @@ async def _prompt_city_from_message(message: Message, state: FSMContext) -> None
 async def back_to_phone_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_phone)
     data = await state.get_data()
+
     await callback_query.message.bot.edit_message_caption(
         chat_id=callback_query.message.chat.id,
         message_id=data.get("message_id", callback_query.message.message_id),
@@ -228,10 +230,11 @@ async def city_handler(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "order:back:city")
 async def back_to_city_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_city)
-    await callback_query.message.bot.edit_message_text(
+
+    await callback_query.message.bot.edit_message_caption(
         chat_id=callback_query.message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        text="🏙️ Введите город доставки.",
+        caption="🏙️ Введите город доставки.",
         reply_markup=_city_keyboard(),
     )
     await callback_query.answer()
@@ -251,10 +254,11 @@ async def branch_handler(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "order:back:branch")
 async def back_to_branch_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_branch)
-    await callback_query.message.bot.edit_message_text(
+
+    await callback_query.message.bot.edit_message_caption(
         chat_id=callback_query.message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        text="📦 Укажите отделение или адрес для доставки.",
+        caption="📦 Укажите отделение или адрес для доставки.",
         reply_markup=_branch_keyboard(),
     )
     await callback_query.answer()
@@ -267,10 +271,16 @@ async def submit_order_callback(
     order_service: OrderService,
     product_service: ProductService,
 ) -> None:
+
     data = await state.get_data()
+
+    user = callback_query.from_user
+
     await order_service.append_order(
-        user_id=callback_query.from_user.id if callback_query.from_user else None,
+        user_id=user.id if user else None,
         chat_id=callback_query.message.chat.id if callback_query.message else 0,
+        username=user.username if user else "",
+        first_name=user.first_name if user else "",
         product_id=data.get("product_id", ""),
         product_name=data.get("product_name", ""),
         product_price=data.get("product_price", ""),
@@ -282,6 +292,7 @@ async def submit_order_callback(
     await callback_query.message.answer(
         "✅ Заказ оформлен! Мы свяжемся с вами для подтверждения."
     )
+
     await state.clear()
     await cancel_order_callback(callback_query, product_service)
     await callback_query.answer()
@@ -293,5 +304,6 @@ async def cancel_from_order_callback(
     state: FSMContext,
     product_service: ProductService,
 ) -> None:
+
     await state.clear()
     await cancel_order_callback(callback_query, product_service)
