@@ -12,6 +12,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.buy import remember_product_card, reset_product_cards
 from services.product_service import ProductService, Product
 from services.user_service import UserService
+from handlers.buy import remember_welcome_message
+
 
 router = Router()
 
@@ -63,13 +65,16 @@ async def start_handler(
     name_part = f", {name}" if name else ""
 
     # --- Мгновенное приветствие ---
-    await message.answer(
+    welcome_msg = await message.answer(
         f"""
-👋 Добро пожаловать{name_part}!
-Мы подготовили для вас лучшие акции сегодня.
-Выберите товар ниже и оформите заказ в несколько кликов ⬇️
+    👋 Добро пожаловать{name_part}!
+    Мы подготовили для вас лучшие акции сегодня.
+    Выберите товар ниже и оформите заказ в несколько кликов ⬇️
         """.strip()
     )
+
+    # NEW
+    remember_welcome_message(message.chat.id, welcome_msg.message_id)
 
     # --- Получаем товары ---
     products = await product_service.get_products(limit=5)

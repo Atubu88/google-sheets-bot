@@ -28,6 +28,8 @@ class SelectedProduct:
 _product_cards: Dict[int, List[StoredCard]] = {}
 _selected_products: Dict[int, SelectedProduct] = {}
 
+_welcome_messages: Dict[int, int] = {}
+
 
 def reset_product_cards(chat_id: int) -> None:
     """Clear stored cards for a chat before sending new ones."""
@@ -54,6 +56,21 @@ def remember_selected_product(chat_id: int, product: Product, message_id: int) -
     _selected_products[chat_id] = SelectedProduct(product=product, message_id=message_id)
 
 
+def remember_welcome_message(chat_id: int, message_id: int):
+    _welcome_messages[chat_id] = message_id
+
+
+# NEW — delete welcome message
+async def delete_welcome_message(chat_id: int, bot):
+    msg_id = _welcome_messages.pop(chat_id, None)
+    if msg_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+
+
+
 def _build_product_caption(product: Product) -> str:
     return (
         f"<b>{product.name}</b>\n"
@@ -70,8 +87,8 @@ def _build_buy_keyboard(product: Product):
 
 def _build_confirmation_keyboard():
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Оформить заказ", callback_data="confirm_order")
-    keyboard.button(text="Отмена", callback_data="cancel_order")
+    keyboard.button(text="🛒 Оформить заказ", callback_data="confirm_order")
+    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
     keyboard.adjust(1)
     return keyboard.as_markup()
 
@@ -96,7 +113,7 @@ async def buy_product_callback(
 
     chat_id = callback_query.message.chat.id
     product_id = callback_query.data.split(":", maxsplit=1)[1]
-
+    await delete_welcome_message(chat_id, callback_query.message.bot)
     cards = _product_cards.get(chat_id, [])
 
     product: Product | None = None
