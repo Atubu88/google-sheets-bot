@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InputMediaPhoto
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from services.product_service import Product, ProductService
@@ -19,7 +19,14 @@ class StoredCard:
     message_id: int
 
 
+@dataclass(slots=True)
+class SelectedProduct:
+    product: Product
+    message_id: int
+
+
 _product_cards: Dict[int, List[StoredCard]] = {}
+_selected_products: Dict[int, SelectedProduct] = {}
 
 
 def reset_product_cards(chat_id: int) -> None:
@@ -28,11 +35,23 @@ def reset_product_cards(chat_id: int) -> None:
     _product_cards.pop(chat_id, None)
 
 
+def clear_selected_product(chat_id: int) -> None:
+    """Remove the remembered selected product for a chat."""
+
+    _selected_products.pop(chat_id, None)
+
+
 def remember_product_card(chat_id: int, product: Product, message_id: int) -> None:
     """Store mapping between chat and message for later edits."""
 
     cards = _product_cards.setdefault(chat_id, [])
     cards.append(StoredCard(product=product, message_id=message_id))
+
+
+def remember_selected_product(chat_id: int, product: Product, message_id: int) -> None:
+    """Persist the chosen product to keep the order flow in sync."""
+
+    _selected_products[chat_id] = SelectedProduct(product=product, message_id=message_id)
 
 
 def _build_product_caption(product: Product) -> str:
@@ -51,10 +70,19 @@ def _build_buy_keyboard(product: Product):
 
 def _build_confirmation_keyboard():
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="✅ Оформить заказ", callback_data="confirm_order")
-    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
+    keyboard.button(text="Оформить заказ", callback_data="confirm_order")
+    keyboard.button(text="Отмена", callback_data="cancel_order")
     keyboard.adjust(1)
     return keyboard.as_markup()
+
+
+def get_selected_product(chat_id: int, message_id: int) -> Product | None:
+    """Return the selected product for a chat if the message still matches."""
+
+    selection = _selected_products.get(chat_id)
+    if selection and selection.message_id == message_id:
+        return selection.product
+    return None
 
 
 @router.callback_query(F.data.startswith("buy:"))
@@ -88,23 +116,28 @@ async def buy_product_callback(
         await callback_query.answer("Товар не найден", show_alert=True)
         return
 
-    confirmation_text = f"🛒 Вы выбрали: {product.name} за {product.price}"
-
     for card in cards:
-        if card.product.id == product_id:
-            await callback_query.message.bot.edit_message_caption(
-                chat_id=chat_id,
-                message_id=card.message_id,
-                caption=confirmation_text,
-                reply_markup=_build_confirmation_keyboard(),
+        try:
+            await callback_query.message.bot.delete_message(
+                chat_id=chat_id, message_id=card.message_id
             )
-        else:
-            await callback_query.message.bot.edit_message_caption(
-                chat_id=chat_id,
-                message_id=card.message_id,
-                caption="Карточка скрыта. Используйте экран подтверждения.",
-                reply_markup=None,
-            )
+        except Exception:
+            # Ignore messages that were already removed or cannot be deleted.
+            pass
+
+    reset_product_cards(chat_id)
+    clear_selected_product(chat_id)
+
+    confirmation_text = f"🛒 Вы выбрали: <b>{product.name}</b>\nЦена: {product.price}"
+
+    confirmation_message = await callback_query.message.bot.send_message(
+        chat_id=chat_id,
+        text=confirmation_text,
+        reply_markup=_build_confirmation_keyboard(),
+        parse_mode="HTML",
+    )
+
+    remember_selected_product(chat_id, product, confirmation_message.message_id)
 
     await callback_query.answer()
 
@@ -120,28 +153,27 @@ async def cancel_order_callback(
 
     chat_id = callback_query.message.chat.id
 
+    clear_selected_product(chat_id)
+
+    try:
+        await callback_query.message.bot.delete_message(
+            chat_id=chat_id, message_id=callback_query.message.message_id
+        )
+    except Exception:
+        pass
+
+    reset_product_cards(chat_id)
+
     products = await product_service.get_products(limit=5)
-    cards = _product_cards.get(chat_id, [])
 
-    message_ids = [card.message_id for card in cards] or [
-        callback_query.message.message_id
-    ]
-
-    new_cards: list[StoredCard] = []
-    for message_id, product in zip(message_ids, products):
-        media = InputMediaPhoto(
-            media=product.photo_url,
+    for product in products:
+        sent_message = await callback_query.message.bot.send_photo(
+            chat_id=chat_id,
+            photo=product.photo_url,
             caption=_build_product_caption(product),
             parse_mode="HTML",
-        )
-        await callback_query.message.bot.edit_message_media(
-            chat_id=chat_id,
-            message_id=message_id,
-            media=media,
             reply_markup=_build_buy_keyboard(product),
         )
-        new_cards.append(StoredCard(product=product, message_id=message_id))
-
-    _product_cards[chat_id] = new_cards
+        remember_product_card(chat_id, product, sent_message.message_id)
 
     await callback_query.answer()
