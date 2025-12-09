@@ -136,7 +136,7 @@ async def confirm_order_callback(
 
 
 @router.callback_query(F.data == "order:contact")
-async def request_contact_callback(callback_query: CallbackQuery) -> None:
+async def request_contact_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
     if callback_query.message is None:
         return
 
@@ -145,11 +145,17 @@ async def request_contact_callback(callback_query: CallbackQuery) -> None:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-    await callback_query.message.answer(
+
+    sent = await callback_query.message.answer(
         "Нажмите кнопку, чтобы отправить контакт, или введите номер вручную.",
         reply_markup=keyboard,
     )
+
+    # 🔥 ВАЖНО: сохраняем ID служебного сообщения
+    await state.update_data(contact_prompt_id=sent.message_id)
+
     await callback_query.answer()
+
 
 
 @router.callback_query(F.data == "order:manual_phone")
@@ -162,10 +168,29 @@ async def manual_phone_callback(callback_query: CallbackQuery) -> None:
 
 @router.message(OrderState.waiting_for_phone, F.contact)
 async def phone_contact_handler(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+
+    # сохраняем номер
     phone = message.contact.phone_number
     await state.update_data(phone=phone)
 
+    # 1 — удалить зелёную карточку контакта
+    try:
+        await message.delete()
+    except:
+        pass
+
+    # 2 — удалить служебное сообщение "Нажмите кнопку..."
+    prompt_id = data.get("contact_prompt_id")
+    if prompt_id:
+        try:
+            await message.bot.delete_message(message.chat.id, prompt_id)
+        except:
+            pass
+
     await state.update_data(city=None, branch=None)
+
+    # продолжить оформление
     await _prompt_city_from_message(message, state)
 
 
@@ -175,7 +200,10 @@ async def phone_text_handler(message: Message, state: FSMContext) -> None:
     if not phone:
         await message.answer("Пожалуйста, отправьте номер телефона.")
         return
-
+    try:
+        await message.delete()
+    except Exception:
+        pass
     await state.update_data(phone=phone, city=None, branch=None)
     await _prompt_city_from_message(message, state)
 
@@ -216,6 +244,10 @@ async def city_handler(message: Message, state: FSMContext) -> None:
     if not city:
         await message.answer("Введите город текстом.")
         return
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     await state.update_data(city=city, branch=None)
     await _prompt_branch(message, state)
@@ -240,6 +272,10 @@ async def branch_handler(message: Message, state: FSMContext) -> None:
     if not branch:
         await message.answer("Введите отделение или адрес.")
         return
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     await state.update_data(branch=branch)
     await _show_confirmation(message, state)
@@ -288,7 +324,6 @@ async def submit_order_callback(
     )
 
     await state.clear()
-    await cancel_order_callback(callback_query, product_service)
     await callback_query.answer()
 
 
