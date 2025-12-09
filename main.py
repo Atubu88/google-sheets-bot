@@ -15,6 +15,7 @@ from handlers import buy
 from handlers import order
 from handlers import start
 from services.order_service import OrderService
+from services.crm_client import LPCRMClient
 from services.product_service import ProductService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
@@ -46,11 +47,13 @@ def build_dependencies() -> dict[str, object]:
     product_service = ProductService(product_sheets_client)
     user_service = UserService(user_sheets_client)
     order_service = OrderService(orders_sheets_client)
+    crm_client = LPCRMClient(api_key=settings.crm_api_key, base_url=settings.crm_base_url)
     return {
         "settings": settings,
         "product_service": product_service,
         "user_service": user_service,
         "order_service": order_service,
+        "crm_client": crm_client,
     }
 
 
@@ -60,6 +63,7 @@ async def main() -> None:
     product_service = deps["product_service"]
     user_service = deps["user_service"]
     order_service = deps["order_service"]
+    crm_client = deps["crm_client"]
 
     bot = Bot(
         token=settings.bot_token,
@@ -73,6 +77,7 @@ async def main() -> None:
         product_service=product_service,
         user_service=user_service,
         order_service=order_service,
+        crm_client=crm_client,
     ))
 
     dp.include_router(start.router)
