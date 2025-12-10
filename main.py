@@ -14,8 +14,8 @@ from config import get_settings
 from handlers import buy
 from handlers import order
 from handlers import start
-from services.order_service import OrderService
 from services.crm_client import LPCRMClient
+from services.customer_service import CustomerService
 from services.product_service import ProductService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
@@ -38,21 +38,15 @@ def build_dependencies() -> dict[str, object]:
         worksheet_name=settings.users_worksheet,
     )
 
-    orders_sheets_client = SheetsClient(
-        service_account_file=settings.service_account_file,
-        spreadsheet_id=settings.spreadsheet_id,
-        worksheet_name=settings.orders_worksheet,
-    )
-
     product_service = ProductService(product_sheets_client)
     user_service = UserService(user_sheets_client)
-    order_service = OrderService(orders_sheets_client)
+    customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(api_key=settings.crm_api_key, base_url=settings.crm_base_url)
     return {
         "settings": settings,
         "product_service": product_service,
         "user_service": user_service,
-        "order_service": order_service,
+        "customer_service": customer_service,
         "crm_client": crm_client,
     }
 
@@ -62,7 +56,7 @@ async def main() -> None:
     settings = deps["settings"]
     product_service = deps["product_service"]
     user_service = deps["user_service"]
-    order_service = deps["order_service"]
+    customer_service = deps["customer_service"]
     crm_client = deps["crm_client"]
 
     bot = Bot(
@@ -76,7 +70,7 @@ async def main() -> None:
     dp.update.middleware(DependencyMiddleware(
         product_service=product_service,
         user_service=user_service,
-        order_service=order_service,
+        customer_service=customer_service,
         crm_client=crm_client,
     ))
 
