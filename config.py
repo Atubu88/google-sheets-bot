@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     crm_base_url: str = Field(
         "http://pureday.lp-crm.biz", validation_alias="CRM_API_BASE_URL"
     )
+    customers_db_path: Path = Field(
+        Path("customers.db"), validation_alias="CUSTOMERS_DB_PATH"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

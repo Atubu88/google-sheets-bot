@@ -17,9 +17,9 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from handlers.buy import cancel_order_callback, get_selected_product
-from services.order_service import OrderService
 from services.product_service import ProductService
 from services.crm_client import LPCRMClient
+from services.customer_service import CustomerService
 
 
 router = Router()
@@ -29,17 +29,25 @@ logger = logging.getLogger(__name__)
 class OrderState(StatesGroup):
     """States for guiding the user through order creation."""
 
+    waiting_for_name = State()
     waiting_for_phone = State()
     waiting_for_city = State()
     waiting_for_branch = State()
     waiting_for_confirmation = State()
 
 
+def _name_keyboard() -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
+    keyboard.adjust(1)
+    return keyboard.as_markup()
+
+
 def _phone_keyboard() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="📱 Отправить контакт", callback_data="order:contact")
     keyboard.button(text="✏️ Ввести вручную", callback_data="order:manual_phone")
-    keyboard.button(text="◀️ Назад", callback_data="cancel_order")
+    keyboard.button(text="◀️ Назад", callback_data="order:back:name")
     keyboard.adjust(1)
     return keyboard.as_markup()
 
@@ -69,10 +77,26 @@ def _confirmation_keyboard() -> InlineKeyboardMarkup:
     return keyboard.as_markup()
 
 
-async def _prompt_phone(callback_query: CallbackQuery, product_name: str) -> None:
+async def _prompt_name(callback_query: CallbackQuery, product_name: str) -> None:
     await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=callback_query.message.message_id,
+        text=(
+            f"Вы выбрали: <b>{product_name}</b>.\n\n"
+            "👤 Введите имя получателя."
+        ),
+        reply_markup=_name_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+async def _prompt_phone(message: Message, state: FSMContext, product_name: str) -> None:
+    await state.set_state(OrderState.waiting_for_phone)
+    data = await state.get_data()
+
+    await message.bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=data["message_id"],
         text=(
             f"Вы выбрали: <b>{product_name}</b>.\n\n"
             "📞 Укажите номер телефона для связи."
@@ -100,6 +124,7 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
         "<b>Проверьте данные заказа:</b>\n\n"
         f"Товар: {data['product_name']}\n"
         f"Цена: {data['product_price']}\n"
+        f"Имя: {data['name']}\n"
         f"Телефон: {data['phone']}\n"
         f"Город: {data['city']}\n"
         f"Отделение: {data['branch']}"
@@ -127,16 +152,38 @@ async def confirm_order_callback(
         await callback_query.answer("Товар не найден", show_alert=True)
         return
 
-    await state.set_state(OrderState.waiting_for_phone)
+    await state.set_state(OrderState.waiting_for_name)
     await state.update_data(
         message_id=callback_query.message.message_id,
         product_id=product.id,
         product_name=product.name,
         product_price=product.price,
+        name=None,
+        phone=None,
+        city=None,
+        branch=None,
     )
 
-    await _prompt_phone(callback_query, product.name)
+    await _prompt_name(callback_query, product.name)
     await callback_query.answer()
+
+
+@router.message(OrderState.waiting_for_name, F.text)
+async def name_handler(message: Message, state: FSMContext) -> None:
+    name = message.text.strip()
+    if not name:
+        await message.answer("Пожалуйста, укажите имя получателя.")
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    await state.update_data(name=name, phone=None, city=None, branch=None)
+    data = await state.get_data()
+
+    await _prompt_phone(message, state, data.get("product_name", ""))
 
 
 @router.callback_query(F.data == "order:contact")
@@ -242,6 +289,24 @@ async def back_to_phone_callback(callback_query: CallbackQuery, state: FSMContex
     await callback_query.answer()
 
 
+@router.callback_query(F.data == "order:back:name")
+async def back_to_name_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(OrderState.waiting_for_name)
+    data = await state.get_data()
+
+    await callback_query.message.bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=data.get("message_id", callback_query.message.message_id),
+        text=(
+            f"Вы выбрали: <b>{data.get('product_name', '')}</b>.\n\n"
+            "👤 Введите имя получателя."
+        ),
+        reply_markup=_name_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback_query.answer()
+
+
 @router.message(OrderState.waiting_for_city, F.text)
 async def city_handler(message: Message, state: FSMContext) -> None:
     city = message.text.strip()
@@ -302,8 +367,7 @@ async def back_to_branch_callback(callback_query: CallbackQuery, state: FSMConte
 async def submit_order_callback(
     callback_query: CallbackQuery,
     state: FSMContext,
-    order_service: OrderService,
-    product_service: ProductService,
+    customer_service: CustomerService,
     crm_client: LPCRMClient,
 ) -> None:
 
@@ -313,22 +377,19 @@ async def submit_order_callback(
 
     product_id = data.get("product_id", "")
     product_price = data.get("product_price", "")
+    name = data.get("name", "")
     phone = data.get("phone", "")
     city = data.get("city", "")
     branch = data.get("branch", "")
 
-    await order_service.append_order(
-        user_id=user.id if user else None,
-        chat_id=callback_query.message.chat.id if callback_query.message else 0,
-        username=user.username if user else "",
-        first_name=user.first_name if user else "",
-        product_id=product_id,
-        product_name=data.get("product_name", ""),
-        product_price=product_price,
-        phone=phone,
-        city=city,
-        branch=branch,
-    )
+    if user:
+        await customer_service.save_or_update(
+            telegram_id=user.id,
+            name=name,
+            phone=phone,
+            city=city,
+            post_office=branch,
+        )
 
     if user:
         crm_order_id = f"{product_id}-{user.id}"
@@ -337,7 +398,7 @@ async def submit_order_callback(
                 order_id=crm_order_id,
                 country="UA",
                 site="telegram-bot",
-                buyer_name = user.full_name or user.first_name or user.username or "Telegram User",
+                buyer_name=name or user.full_name or user.first_name or user.username or "Telegram User",
                 phone=phone,
                 comment="Order from Telegram bot",
                 product_id=product_id,
