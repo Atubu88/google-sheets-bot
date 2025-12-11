@@ -20,9 +20,29 @@ from services.product_service import ProductService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
 from middlewares.deps import DependencyMiddleware
+import sys
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+def configure_logging(level: int = logging.INFO) -> logging.Logger:
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Удаляем любые старые хендлеры, чтобы избежать дублирования и конфликтов
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+
+    # Создаём handler, который пишет в stdout
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    ))
+
+    root.addHandler(handler)
+
+    # Настраиваем уровни библиотек
+    logging.getLogger("aiogram").setLevel(level)
+    logging.getLogger("aiohttp").setLevel(level)
+
+    return logging.getLogger(__name__)
 
 
 def build_dependencies() -> dict[str, object]:
@@ -50,6 +70,7 @@ def build_dependencies() -> dict[str, object]:
         "crm_client": crm_client,
     }
 
+logger = configure_logging()
 
 async def main() -> None:
     deps = build_dependencies()
