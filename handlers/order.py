@@ -129,13 +129,13 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderState.waiting_for_confirmation)
 
     summary = (
-        "<b>Проверьте данные заказа:</b>\n\n"
-        f"Товар: {data['product_name']}\n"
-        f"Цена: {data['product_price']}\n"
-        f"Имя: {data['name']}\n"
-        f"Телефон: {data['phone']}\n"
-        f"Город: {data['city']}\n"
-        f"Отделение: {data['branch']}"
+        "<b>📝 Проверьте данные заказа:</b>\n\n"
+        f"📦 Товар: <b>{data['product_name']}</b>\n"
+        f"💰 Цена: {data['product_price']}\n"
+        f"👤 Имя: {data['name']}\n"
+        f"📱 Телефон: {data['phone']}\n"
+        f"🏙 Город: {data['city']}\n"
+        f"📮 Отделение: {data['branch']}"
     )
 
     await message.bot.edit_message_text(
@@ -178,13 +178,13 @@ async def confirm_order_callback(
 
     if customer:
         text = (
-            f"Вы выбрали: <b>{product.name}</b>.\n\n"
-            "Найдены ваши данные:\n"
-            f"Имя: {customer['name']}\n"
-            f"Телефон: {customer['phone']}\n"
-            f"Город: {customer['city']}\n"
-            f"Отделение: {customer['post_office']}\n"
-            "Использовать их?"
+            f"✨ Вы выбрали: <b>{product.name}</b>\n\n"
+            "🔎 Найдены ваши данные:\n"
+            f"👤 Имя: {customer['name']}\n"
+            f"📱 Телефон: {customer['phone']}\n"
+            f"🏙 Город: {customer['city']}\n"
+            f"📮 Отделение: {customer['post_office']}\n\n"
+            "Использовать эти данные?"
         )
 
         await callback_query.message.bot.edit_message_text(
@@ -264,6 +264,11 @@ async def auto_use_customer_callback(
     except Exception:
         logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
 
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     await callback_query.message.answer("Заказ оформлен")
     await state.clear()
     await callback_query.answer()
@@ -292,7 +297,7 @@ async def auto_edit_customer_callback(
 async def name_handler(message: Message, state: FSMContext) -> None:
     name = message.text.strip()
     if not name:
-        await message.answer("Пожалуйста, укажите имя получателя.")
+        await message.answer("Пожалуйста, введите Фамилию и Имя для оформления доставки.")
         return
 
     try:
@@ -526,6 +531,11 @@ async def submit_order_callback(
             )
         except Exception:
             logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
+
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
     await callback_query.message.answer(
         "✅ Заказ оформлен! Мы свяжемся с вами для подтверждения."
