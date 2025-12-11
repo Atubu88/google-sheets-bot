@@ -77,6 +77,14 @@ def _confirmation_keyboard() -> InlineKeyboardMarkup:
     return keyboard.as_markup()
 
 
+def _autofill_keyboard() -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Да", callback_data="order:auto_use")
+    keyboard.button(text="Изменить", callback_data="order:auto_edit")
+    keyboard.adjust(1)
+    return keyboard.as_markup()
+
+
 async def _prompt_name(callback_query: CallbackQuery, product_name: str) -> None:
     await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
@@ -141,7 +149,7 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "confirm_order")
 async def confirm_order_callback(
-    callback_query: CallbackQuery, state: FSMContext
+    callback_query: CallbackQuery, state: FSMContext, customer_service: CustomerService
 ) -> None:
     if callback_query.message is None:
         return
@@ -152,7 +160,7 @@ async def confirm_order_callback(
         await callback_query.answer("Товар не найден", show_alert=True)
         return
 
-    await state.set_state(OrderState.waiting_for_name)
+    await state.clear()
     await state.update_data(
         message_id=callback_query.message.message_id,
         product_id=product.id,
@@ -164,7 +172,102 @@ async def confirm_order_callback(
         branch=None,
     )
 
+    customer = None
+    if callback_query.from_user:
+        customer = await customer_service.get_customer(callback_query.from_user.id)
+
+    if customer:
+        text = (
+            f"Вы выбрали: <b>{product.name}</b>.\n\n"
+            "Найдены ваши данные:\n"
+            f"Имя: {customer.name}\n"
+            f"Телефон: {customer.phone}\n"
+            f"Город: {customer.city}\n"
+            f"Отделение: {customer.post_office}\n"
+            "Использовать их?"
+        )
+
+        await callback_query.message.bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text=text,
+            reply_markup=_autofill_keyboard(),
+            parse_mode="HTML",
+        )
+        await callback_query.answer()
+        return
+
+    await state.set_state(OrderState.waiting_for_name)
     await _prompt_name(callback_query, product.name)
+    await callback_query.answer()
+
+
+@router.callback_query(F.data == "order:auto_use")
+async def auto_use_customer_callback(
+    callback_query: CallbackQuery,
+    state: FSMContext,
+    customer_service: CustomerService,
+    crm_client: LPCRMClient,
+) -> None:
+    if callback_query.message is None or callback_query.from_user is None:
+        return
+
+    data = await state.get_data()
+    product_id = data.get("product_id")
+    product_price = data.get("product_price")
+    product_name = data.get("product_name")
+
+    if not product_id:
+        await callback_query.answer("Не удалось определить товар", show_alert=True)
+        return
+
+    customer = await customer_service.get_customer(callback_query.from_user.id)
+
+    if not customer:
+        await state.set_state(OrderState.waiting_for_name)
+        await state.update_data(name=None, phone=None, city=None, branch=None)
+        await _prompt_name(callback_query, product_name or "")
+        await callback_query.answer("Заполните данные вручную", show_alert=True)
+        return
+
+    crm_order_id = f"{product_id}-{callback_query.from_user.id}"
+    try:
+        await crm_client.send_order(
+            order_id=crm_order_id,
+            country="UA",
+            site="telegram-bot",
+            buyer_name=customer.name
+            or callback_query.from_user.full_name
+            or callback_query.from_user.first_name
+            or callback_query.from_user.username
+            or "Telegram User",
+            phone=customer.phone,
+            comment="Order from Telegram bot",
+            product_id=product_id,
+            price=product_price,
+        )
+    except Exception:
+        logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
+
+    await callback_query.message.answer("Заказ оформлен")
+    await state.clear()
+    await callback_query.answer()
+
+
+@router.callback_query(F.data == "order:auto_edit")
+async def auto_edit_customer_callback(
+    callback_query: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if callback_query.message is None:
+        return
+
+    data = await state.get_data()
+    product_name = data.get("product_name", "")
+
+    await state.set_state(OrderState.waiting_for_name)
+    await state.update_data(name=None, phone=None, city=None, branch=None)
+    await _prompt_name(callback_query, product_name)
     await callback_query.answer()
 
 
