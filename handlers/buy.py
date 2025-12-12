@@ -106,14 +106,18 @@ def get_selected_product(chat_id: int, message_id: int) -> Product | None:
 async def buy_product_callback(
     callback_query: CallbackQuery, product_service: ProductService
 ) -> None:
-    """Handle product selection and show confirmation screen."""
+    """Пользователь выбрал товар — показываем карточку товара с кнопками оформления."""
 
     if callback_query.message is None:
         return
 
     chat_id = callback_query.message.chat.id
     product_id = callback_query.data.split(":", maxsplit=1)[1]
+
+    # Удаляем только приветственное сообщение, карточки НЕ трогаем
     await delete_welcome_message(chat_id, callback_query.message.bot)
+
+    # Ищем товар среди кешированных карточек
     cards = _product_cards.get(chat_id, [])
 
     product: Product | None = None
@@ -122,6 +126,7 @@ async def buy_product_callback(
             product = card.product
             break
 
+    # fallback — если его нет среди карточек
     if product is None:
         products = await product_service.get_products(limit=5)
         for item in products:
@@ -133,30 +138,33 @@ async def buy_product_callback(
         await callback_query.answer("Товар не найден", show_alert=True)
         return
 
-    for card in cards:
-        try:
-            await callback_query.message.bot.delete_message(
-                chat_id=chat_id, message_id=card.message_id
-            )
-        except Exception:
-            # Ignore messages that were already removed or cannot be deleted.
-            pass
+    # --- 🆕 НЕ удаляем карточки товаров ---
 
-    reset_product_cards(chat_id)
-    clear_selected_product(chat_id)
+    # --- 🆕 Создаём новое сообщение-карточку товара ---
+    caption = (
+        f"<b>{product.name}</b>\n"
+        f"{product.description}\n\n"
+        f"Цена: {product.price}"
+    )
 
-    confirmation_text = f"🛒 Вы выбрали: <b>{product.name}</b>\nЦена: {product.price}"
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="🛒 Оформить заказ", callback_data="confirm_order")
+    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
+    keyboard.adjust(1)
 
-    confirmation_message = await callback_query.message.bot.send_message(
+    new_msg = await callback_query.message.bot.send_photo(
         chat_id=chat_id,
-        text=confirmation_text,
-        reply_markup=_build_confirmation_keyboard(),
+        photo=product.photo_url,
+        caption=caption,
+        reply_markup=keyboard.as_markup(),
         parse_mode="HTML",
     )
 
-    remember_selected_product(chat_id, product, confirmation_message.message_id)
+    # Сохраняем выбранный товар для оформления
+    remember_selected_product(chat_id, product, new_msg.message_id)
 
     await callback_query.answer()
+
 
 
 @router.callback_query(F.data == "cancel_order")
