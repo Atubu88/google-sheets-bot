@@ -31,8 +31,7 @@ class OrderState(StatesGroup):
 
     waiting_for_name = State()
     waiting_for_phone = State()
-    waiting_for_city = State()
-    waiting_for_branch = State()
+    waiting_for_city_branch = State()
     waiting_for_confirmation = State()
 
 
@@ -60,18 +59,10 @@ def _city_keyboard() -> InlineKeyboardMarkup:
     return keyboard.as_markup()
 
 
-def _branch_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="◀️ Назад", callback_data="order:back:city")
-    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
-
-
 def _confirmation_keyboard() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="✅ Подтвердить", callback_data="order:submit")
-    keyboard.button(text="◀️ Назад", callback_data="order:back:branch")
+    keyboard.button(text="◀️ Назад", callback_data="order:back:city")
     keyboard.button(text="❌ Отмена", callback_data="cancel_order")
     keyboard.adjust(1)
     return keyboard.as_markup()
@@ -114,16 +105,6 @@ async def _prompt_phone(message: Message, state: FSMContext, product_name: str) 
     )
 
 
-async def _prompt_branch(message: Message, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_branch)
-    await message.bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=(await state.get_data())["message_id"],
-        text="📦 Укажите отделение или адрес для доставки.",
-        reply_markup=_branch_keyboard(),
-    )
-
-
 async def _show_confirmation(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.set_state(OrderState.waiting_for_confirmation)
@@ -134,8 +115,7 @@ async def _show_confirmation(message: Message, state: FSMContext) -> None:
         f"💰 Цена: {data['product_price']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📱 Телефон: {data['phone']}\n"
-        f"🏙 Город: {data['city']}\n"
-        f"📮 Отделение: {data['branch']}"
+        f"📦 Доставка: {data['city_branch']}"
     )
 
     await message.bot.edit_message_text(
@@ -168,8 +148,7 @@ async def confirm_order_callback(
         product_price=product.price,
         name=None,
         phone=None,
-        city=None,
-        branch=None,
+        city_branch=None,
     )
 
     customer = None
@@ -177,13 +156,17 @@ async def confirm_order_callback(
         customer = await customer_service.get_customer(callback_query.from_user.id)
 
     if customer:
+        delivery = customer.get("city") or ""
+        post_office = customer.get("post_office") or ""
+        if post_office and post_office != delivery:
+            delivery = f"{delivery}, {post_office}" if delivery else post_office
+
         text = (
             f"✨ Вы выбрали: <b>{product.name}</b>\n\n"
             "🔎 Найдены ваши данные:\n"
             f"👤 Имя: {customer['name']}\n"
             f"📱 Телефон: {customer['phone']}\n"
-            f"🏙 Город: {customer['city']}\n"
-            f"📮 Отделение: {customer['post_office']}\n\n"
+            f"📦 Доставка: {delivery}\n\n"
             "Использовать эти данные?"
         )
 
@@ -226,7 +209,7 @@ async def auto_use_customer_callback(
     # Клиента нет → запрашиваем данные вручную
     if not customer:
         await state.set_state(OrderState.waiting_for_name)
-        await state.update_data(name=None, phone=None, city=None, branch=None)
+        await state.update_data(name=None, phone=None, city_branch=None)
         await _prompt_name(callback_query, product_name or "")
         await callback_query.answer("Заполните данные вручную", show_alert=True)
         return
@@ -250,6 +233,11 @@ async def auto_use_customer_callback(
 
     crm_order_id = f"{product_id}-{callback_query.from_user.id}"
 
+    delivery = customer.get("city") or ""
+    post_office = customer.get("post_office") or ""
+    if post_office and post_office != delivery:
+        delivery = f"{delivery}, {post_office}" if delivery else post_office
+
     try:
         await crm_client.send_order(
             order_id=crm_order_id,
@@ -257,7 +245,7 @@ async def auto_use_customer_callback(
             site="telegram-bot",
             buyer_name=safe_buyer_name,
             phone=safe_phone,
-            comment="Order from Telegram bot",
+            comment=f"Order from Telegram bot\nDelivery: {delivery}",
             product_id=product_id,
             price=product_price,
         )
@@ -288,7 +276,7 @@ async def auto_edit_customer_callback(
     product_name = data.get("product_name", "")
 
     await state.set_state(OrderState.waiting_for_name)
-    await state.update_data(name=None, phone=None, city=None, branch=None)
+    await state.update_data(name=None, phone=None, city_branch=None)
     await _prompt_name(callback_query, product_name)
     await callback_query.answer()
 
@@ -305,7 +293,7 @@ async def name_handler(message: Message, state: FSMContext) -> None:
     except Exception:
         pass
 
-    await state.update_data(name=name, phone=None, city=None, branch=None)
+    await state.update_data(name=name, phone=None, city_branch=None)
     data = await state.get_data()
 
     await _prompt_phone(message, state, data.get("product_name", ""))
@@ -364,10 +352,10 @@ async def phone_contact_handler(message: Message, state: FSMContext) -> None:
         except:
             pass
 
-    await state.update_data(city=None, branch=None)
+    await state.update_data(city_branch=None)
 
     # продолжить оформление
-    await _prompt_city_from_message(message, state)
+    await prompt_city_branch(message, state)
 
 
 @router.message(OrderState.waiting_for_phone, F.text)
@@ -380,18 +368,18 @@ async def phone_text_handler(message: Message, state: FSMContext) -> None:
         await message.delete()
     except Exception:
         pass
-    await state.update_data(phone=phone, city=None, branch=None)
-    await _prompt_city_from_message(message, state)
+    await state.update_data(phone=phone, city_branch=None)
+    await prompt_city_branch(message, state)
 
 
-async def _prompt_city_from_message(message: Message, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_city)
+async def prompt_city_branch(message: Message, state: FSMContext) -> None:
+    await state.set_state(OrderState.waiting_for_city_branch)
     data = await state.get_data()
 
     await message.bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=data["message_id"],
-        text="🏙️ Введите город доставки.",
+        text="Введите город и отделение одним сообщением",
         reply_markup=_city_keyboard(),
     )
 
@@ -432,60 +420,32 @@ async def back_to_name_callback(callback_query: CallbackQuery, state: FSMContext
     await callback_query.answer()
 
 
-@router.message(OrderState.waiting_for_city, F.text)
-async def city_handler(message: Message, state: FSMContext) -> None:
-    city = message.text.strip()
-    if not city:
-        await message.answer("Введите город текстом.")
-        return
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    await state.update_data(city=city, branch=None)
-    await _prompt_branch(message, state)
-
-
 @router.callback_query(F.data == "order:back:city")
 async def back_to_city_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_city)
+    await state.set_state(OrderState.waiting_for_city_branch)
 
     await callback_query.message.bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=(await state.get_data())["message_id"],
-        text="🏙️ Введите город доставки.",
+        text="Введите город и отделение одним сообщением",
         reply_markup=_city_keyboard(),
     )
     await callback_query.answer()
 
 
-@router.message(OrderState.waiting_for_branch, F.text)
-async def branch_handler(message: Message, state: FSMContext) -> None:
-    branch = message.text.strip()
-    if not branch:
-        await message.answer("Введите отделение или адрес.")
+@router.message(OrderState.waiting_for_city_branch, F.text)
+async def city_branch_handler(message: Message, state: FSMContext) -> None:
+    city_branch = message.text.strip()
+    if not city_branch:
+        await message.answer("Введите город и отделение одним сообщением.")
         return
     try:
         await message.delete()
     except Exception:
         pass
 
-    await state.update_data(branch=branch)
+    await state.update_data(city_branch=city_branch)
     await _show_confirmation(message, state)
-
-
-@router.callback_query(F.data == "order:back:branch")
-async def back_to_branch_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_branch)
-
-    await callback_query.message.bot.edit_message_text(
-        chat_id=callback_query.message.chat.id,
-        message_id=(await state.get_data())["message_id"],
-        text="📦 Укажите отделение или адрес для доставки.",
-        reply_markup=_branch_keyboard(),
-    )
-    await callback_query.answer()
 
 
 @router.callback_query(F.data == "order:submit")
@@ -504,16 +464,15 @@ async def submit_order_callback(
     product_price = data.get("product_price", "")
     name = data.get("name", "")
     phone = data.get("phone", "")
-    city = data.get("city", "")
-    branch = data.get("branch", "")
+    city_branch = data.get("city_branch", "")
 
     if user:
         await customer_service.save_or_update(
             telegram_id=user.id,
             name=name,
             phone=phone,
-            city=city,
-            post_office=branch,
+            city=city_branch,
+            post_office=city_branch,
         )
 
     if user:
