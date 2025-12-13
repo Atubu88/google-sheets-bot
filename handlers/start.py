@@ -77,7 +77,7 @@ async def start_handler(
     remember_welcome_message(message.chat.id, welcome_msg.message_id)
 
     # --- Получаем товары ---
-    products = await product_service.get_products(limit=5)
+    products = await product_service.get_products()
 
     if not products:
         await message.answer("Пока нет доступных товаров. Загляните позже!")
