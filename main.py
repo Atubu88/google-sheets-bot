@@ -4,23 +4,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import get_settings
 from handlers import buy
 from handlers import order
 from handlers import start
+from middlewares.deps import DependencyMiddleware
 from services.crm_client import LPCRMClient
 from services.customer_service import CustomerService
 from services.product_service import ProductService
+from services.promo_scheduler import promo_tick
+from services.promo_settings_service import PromoSettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
-from middlewares.deps import DependencyMiddleware
-import sys
 
 def configure_logging(level: int = logging.INFO) -> logging.Logger:
     root = logging.getLogger()
@@ -60,12 +63,19 @@ def build_dependencies() -> dict[str, object]:
 
     product_service = ProductService(product_sheets_client)
     user_service = UserService(user_sheets_client)
+    promo_settings_client = SheetsClient(
+        service_account_file=settings.service_account_file,
+        spreadsheet_id=settings.spreadsheet_id,
+        worksheet_name=settings.promo_settings_worksheet,
+    )
+    promo_settings_service = PromoSettingsService(promo_settings_client)
     customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(api_key=settings.crm_api_key, base_url=settings.crm_base_url)
     return {
         "settings": settings,
         "product_service": product_service,
         "user_service": user_service,
+        "promo_settings_service": promo_settings_service,
         "customer_service": customer_service,
         "crm_client": crm_client,
     }
@@ -77,6 +87,7 @@ async def main() -> None:
     settings = deps["settings"]
     product_service = deps["product_service"]
     user_service = deps["user_service"]
+    promo_settings_service = deps["promo_settings_service"]
     customer_service = deps["customer_service"]
     crm_client = deps["crm_client"]
 
@@ -107,9 +118,18 @@ async def main() -> None:
     )
 
     logger.info("Starting bot")
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        promo_tick,
+        "interval",
+        hours=1,
+        args=(bot, product_service, user_service, promo_settings_service),
+    )
+    scheduler.start()
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown(wait=False)
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
