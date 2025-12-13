@@ -1,515 +1,502 @@
-"""Order flow handlers for collecting delivery details."""
+"""Order flow handlers with media-based step updates (aiogram 3)."""
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.filters import StateFilter
 from aiogram.types import (
     CallbackQuery,
+    Message,
     InlineKeyboardMarkup,
     KeyboardButton,
-    Message,
     ReplyKeyboardMarkup,
+    FSInputFile,
+    InputMediaPhoto,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from handlers.buy import cancel_order_callback, get_selected_product
 from services.product_service import ProductService
-from services.crm_client import LPCRMClient
 from services.customer_service import CustomerService
+from services.crm_client import LPCRMClient
 
 
 router = Router()
 logger = logging.getLogger(__name__)
 
+IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
+
+
+# ===================== STATES =====================
 
 class OrderState(StatesGroup):
-    """States for guiding the user through order creation."""
-
     waiting_for_name = State()
     waiting_for_phone = State()
     waiting_for_city_branch = State()
     waiting_for_confirmation = State()
 
 
-def _name_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
+# ===================== KEYBOARDS =====================
+
+def name_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data="order:back:product")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+    return kb.as_markup()
 
 
-def _phone_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="📱 Отправить контакт", callback_data="order:contact")
-    keyboard.button(text="✏️ Ввести вручную", callback_data="order:manual_phone")
-    keyboard.button(text="◀️ Назад", callback_data="order:back:name")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
+def confirm_existing_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Подтвердить заказ", callback_data="order:confirm_existing")
+    kb.button(text="✏️ Изменить данные", callback_data="order:edit_existing")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+    return kb.as_markup()
 
+async def go_to_city_branch_step(
+    source: Message,
+    state: FSMContext,
+):
+    await state.set_state(OrderState.waiting_for_city_branch)
 
-def _city_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="◀️ Назад", callback_data="order:back:phone")
-    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
-
-
-def _confirmation_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="✅ Подтвердить", callback_data="order:submit")
-    keyboard.button(text="◀️ Назад", callback_data="order:back:city")
-    keyboard.button(text="❌ Отмена", callback_data="cancel_order")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
-
-
-def _autofill_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Да", callback_data="order:auto_use")
-    keyboard.button(text="Изменить", callback_data="order:auto_edit")
-    keyboard.adjust(1)
-    return keyboard.as_markup()
-
-
-async def _prompt_name(callback_query: CallbackQuery, product_name: str) -> None:
-    await callback_query.message.bot.edit_message_text(
-        chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
-        text=(
-            f"Вы выбрали: <b>{product_name}</b>.\n\n"
-            "👤 Введите имя получателя."
+    await update_step(
+        source,
+        state,
+        "step_city_branch.jpg",
+        (
+            "📦 Введите город и номер отделения одним сообщением.\n\n"
+            "Пример:\n"
+            "Киев, отделение №7"
         ),
-        reply_markup=_name_keyboard(),
-        parse_mode="HTML",
+        city_branch_kb(),
     )
 
 
-async def _prompt_phone(message: Message, state: FSMContext, product_name: str) -> None:
-    await state.set_state(OrderState.waiting_for_phone)
+
+def phone_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Отправить контакт", callback_data="order:contact")
+    kb.button(text="✏️ Ввести вручную", callback_data="order:manual_phone")
+    kb.button(text="◀️ Назад", callback_data="order:back:name")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def city_branch_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data="order:back:phone")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def confirm_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Подтвердить", callback_data="order:submit")
+    kb.button(text="◀️ Назад", callback_data="order:back:city_branch")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ===================== CORE UPDATE =====================
+
+async def update_step(
+    source: CallbackQuery | Message,
+    state: FSMContext,
+    image_name: str,
+    text: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    """Safely update message media for order steps."""
+
+    if not text:
+        text = " "
+
     data = await state.get_data()
+    message_id = data.get("message_id")
+    if not message_id:
+        logger.warning("update_step: no message_id")
+        return
 
-    await message.bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=data["message_id"],
-        text=(
-            f"Вы выбрали: <b>{product_name}</b>.\n\n"
-            "📞 Укажите номер телефона для связи."
-        ),
-        reply_markup=_phone_keyboard(),
-        parse_mode="HTML",
-    )
+    if isinstance(source, CallbackQuery):
+        chat_id = source.message.chat.id
+        bot = source.message.bot
+    else:
+        chat_id = source.chat.id
+        bot = source.bot
+
+    image_path = IMAGES_DIR / image_name
+
+    try:
+        if image_path.exists():
+            media = InputMediaPhoto(
+                media=FSInputFile(image_path),
+                caption=text,
+                parse_mode="HTML",
+            )
+            await bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=media,
+                reply_markup=keyboard,
+            )
+        else:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+    except Exception:
+        logger.exception("Failed to update step %s", image_name)
 
 
-async def _show_confirmation(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    await state.set_state(OrderState.waiting_for_confirmation)
-
-    summary = (
-        "<b>📝 Проверьте данные заказа:</b>\n\n"
-        f"📦 Товар: <b>{data['product_name']}</b>\n"
-        f"💰 Цена: {data['product_price']}\n"
-        f"👤 Имя: {data['name']}\n"
-        f"📱 Телефон: {data['phone']}\n"
-        f"📦 Доставка: {data['city_branch']}"
-    )
-
-    await message.bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=data["message_id"],
-        text=summary,
-        reply_markup=_confirmation_keyboard(),
-        parse_mode="HTML",
-    )
-
+# ===================== FLOW START =====================
 
 @router.callback_query(F.data == "confirm_order")
 async def confirm_order_callback(
-    callback_query: CallbackQuery, state: FSMContext, customer_service: CustomerService
-) -> None:
-    if callback_query.message is None:
-        return
+    callback: CallbackQuery,
+    state: FSMContext,
+    customer_service: CustomerService,
+):
+    chat_id = callback.message.chat.id
+    product = get_selected_product(chat_id, callback.message.message_id)
 
-    chat_id = callback_query.message.chat.id
-    product = get_selected_product(chat_id, callback_query.message.message_id)
-    if product is None:
-        await callback_query.answer("Товар не найден", show_alert=True)
+    if not product:
+        await callback.answer("Товар не найден", show_alert=True)
         return
 
     await state.clear()
     await state.update_data(
-        message_id=callback_query.message.message_id,
+        message_id=callback.message.message_id,
         product_id=product.id,
         product_name=product.name,
         product_price=product.price,
-        name=None,
-        phone=None,
-        city_branch=None,
     )
 
-    customer = None
-    if callback_query.from_user:
-        customer = await customer_service.get_customer(callback_query.from_user.id)
+    customer = await customer_service.get_customer(callback.from_user.id)
 
+    # ✅ ВТОРОЙ КОНТАКТ
     if customer:
-        delivery = customer.get("city") or ""
-        post_office = customer.get("post_office") or ""
-        if post_office and post_office != delivery:
-            delivery = f"{delivery}, {post_office}" if delivery else post_office
+        city = (customer.get("city") or "").strip()
+        post_office = (customer.get("post_office") or "").strip()
+
+        # 🧼 защита от дублей старых данных
+        if post_office and post_office == city:
+            post_office = ""
+
+        delivery = ", ".join(filter(None, [city, post_office]))
 
         text = (
             f"✨ Вы выбрали: <b>{product.name}</b>\n\n"
-            "🔎 Найдены ваши данные:\n"
-            f"👤 Имя: {customer['name']}\n"
-            f"📱 Телефон: {customer['phone']}\n"
+            "Мы нашли ваши данные:\n"
+            f"👤 Имя: {customer.get('name')}\n"
+            f"📱 Телефон: {customer.get('phone')}\n"
             f"📦 Доставка: {delivery}\n\n"
             "Использовать эти данные?"
         )
 
-        await callback_query.message.bot.edit_message_text(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            text=text,
-            reply_markup=_autofill_keyboard(),
-            parse_mode="HTML",
+        await update_step(
+            callback,
+            state,
+            "step_confirm.jpg",
+            text,
+            confirm_existing_kb(),
         )
-        await callback_query.answer()
+        await callback.answer()
         return
 
+    # 🆕 ПЕРВЫЙ КОНТАКТ
     await state.set_state(OrderState.waiting_for_name)
-    await _prompt_name(callback_query, product.name)
-    await callback_query.answer()
-
-@router.callback_query(F.data == "order:auto_use")
-async def auto_use_customer_callback(
-    callback_query: CallbackQuery,
-    state: FSMContext,
-    customer_service: CustomerService,
-    crm_client: LPCRMClient,
-) -> None:
-    if callback_query.message is None or callback_query.from_user is None:
-        return
-
-    data = await state.get_data()
-    product_id = data.get("product_id")
-    product_price = data.get("product_price")
-    product_name = data.get("product_name")
-
-    if not product_id:
-        await callback_query.answer("Не удалось определить товар", show_alert=True)
-        return
-
-    # Получаем клиента из SQLite
-    customer = await customer_service.get_customer(callback_query.from_user.id)
-
-    # Клиента нет → запрашиваем данные вручную
-    if not customer:
-        await state.set_state(OrderState.waiting_for_name)
-        await state.update_data(name=None, phone=None, city_branch=None)
-        await _prompt_name(callback_query, product_name or "")
-        await callback_query.answer("Заполните данные вручную", show_alert=True)
-        return
-
-    # ---------------------------
-    # ✔ Безопасное извлечение данных клиента
-    # ---------------------------
-    raw_name = (customer.get("name") or "").strip()
-    raw_phone = (customer.get("phone") or "").strip()
-
-    safe_buyer_name = (
-        raw_name
-        or callback_query.from_user.full_name
-        or callback_query.from_user.first_name
-        or callback_query.from_user.username
-        or "Telegram User"
+    await update_step(
+        callback,
+        state,
+        "step_name.jpg",
+        f"✨ Вы выбрали: <b>{product.name}</b>\n\n👤 Введите имя получателя.",
+        name_kb(),
     )
-
-    safe_phone = raw_phone
-    # ---------------------------
-
-    crm_order_id = f"{product_id}-{callback_query.from_user.id}"
-
-    delivery = customer.get("city") or ""
-    post_office = customer.get("post_office") or ""
-    if post_office and post_office != delivery:
-        delivery = f"{delivery}, {post_office}" if delivery else post_office
-
-    try:
-        await crm_client.send_order(
-            order_id=crm_order_id,
-            country="UA",
-            site="telegram-bot",
-            buyer_name=safe_buyer_name,
-            phone=safe_phone,
-            comment=f"Order from Telegram bot\nDelivery: {delivery}",
-            product_id=product_id,
-            price=product_price,
-        )
-    except Exception:
-        logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
-
-    try:
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    await callback_query.message.answer("Заказ оформлен")
-    await state.clear()
-    await callback_query.answer()
+    await callback.answer()
 
 
 
-
-@router.callback_query(F.data == "order:auto_edit")
-async def auto_edit_customer_callback(
-    callback_query: CallbackQuery,
-    state: FSMContext,
-) -> None:
-    if callback_query.message is None:
-        return
-
-    data = await state.get_data()
-    product_name = data.get("product_name", "")
-
-    await state.set_state(OrderState.waiting_for_name)
-    await state.update_data(name=None, phone=None, city_branch=None)
-    await _prompt_name(callback_query, product_name)
-    await callback_query.answer()
-
+# ===================== NAME =====================
 
 @router.message(OrderState.waiting_for_name, F.text)
-async def name_handler(message: Message, state: FSMContext) -> None:
+async def name_handler(message: Message, state: FSMContext):
     name = message.text.strip()
     if not name:
-        await message.answer("Пожалуйста, введите Фамилию и Имя для оформления доставки.")
         return
 
-    try:
-        await message.delete()
-    except Exception:
-        pass
+    await message.delete()
+    await state.update_data(name=name)
+    await state.set_state(OrderState.waiting_for_phone)
 
-    await state.update_data(name=name, phone=None, city_branch=None)
     data = await state.get_data()
+    await update_step(
+        message,
+        state,
+        "step_phone.jpg",
+        f"Вы выбрали: <b>{data['product_name']}</b>\n\n📞 Укажите номер телефона.",
+        phone_kb(),
+    )
 
-    await _prompt_phone(message, state, data.get("product_name", ""))
 
+# ===================== PHONE =====================
 
 @router.callback_query(F.data == "order:contact")
-async def request_contact_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
-    if callback_query.message is None:
-        return
-
-    keyboard = ReplyKeyboardMarkup(
+async def phone_contact_request(callback: CallbackQuery, state: FSMContext):
+    kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
-    sent = await callback_query.message.answer(
-        "Нажмите кнопку, чтобы отправить контакт, или введите номер вручную.",
-        reply_markup=keyboard,
-    )
-
-    # 🔥 ВАЖНО: сохраняем ID служебного сообщения
+    sent = await callback.message.answer("Отправьте контакт:", reply_markup=kb)
     await state.update_data(contact_prompt_id=sent.message_id)
-
-    await callback_query.answer()
-
-
-
-@router.callback_query(F.data == "order:manual_phone")
-async def manual_phone_callback(callback_query: CallbackQuery) -> None:
-    if callback_query.message is None:
-        return
-
-    await callback_query.answer("Введите номер сообщением", show_alert=False)
+    await callback.answer()
 
 
 @router.message(OrderState.waiting_for_phone, F.contact)
-async def phone_contact_handler(message: Message, state: FSMContext) -> None:
+async def phone_contact_handler(message: Message, state: FSMContext):
+    await message.delete()
     data = await state.get_data()
 
-    # сохраняем номер
-    phone = message.contact.phone_number
-    await state.update_data(phone=phone)
-
-    # 1 — удалить зелёную карточку контакта
-    try:
-        await message.delete()
-    except:
-        pass
-
-    # 2 — удалить служебное сообщение "Нажмите кнопку..."
-    prompt_id = data.get("contact_prompt_id")
-    if prompt_id:
+    if data.get("contact_prompt_id"):
         try:
-            await message.bot.delete_message(message.chat.id, prompt_id)
-        except:
+            await message.bot.delete_message(message.chat.id, data["contact_prompt_id"])
+        except Exception:
             pass
 
-    await state.update_data(city_branch=None)
+    await state.update_data(phone=message.contact.phone_number)
 
-    # продолжить оформление
-    await prompt_city_branch(message, state)
+    await go_to_city_branch_step(message, state)
 
 
 @router.message(OrderState.waiting_for_phone, F.text)
-async def phone_text_handler(message: Message, state: FSMContext) -> None:
-    phone = message.text.strip()
-    if not phone:
-        await message.answer("Пожалуйста, отправьте номер телефона.")
-        return
-    try:
-        await message.delete()
-    except Exception:
-        pass
-    await state.update_data(phone=phone, city_branch=None)
-    await prompt_city_branch(message, state)
+async def phone_text_handler(message: Message, state: FSMContext):
+    await message.delete()
+    await state.update_data(phone=message.text.strip())
+
+    await go_to_city_branch_step(message, state)
 
 
-async def prompt_city_branch(message: Message, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_city_branch)
-    data = await state.get_data()
+# ===================== CITY =====================
 
-    await message.bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=data["message_id"],
-        text="Введите город и отделение одним сообщением",
-        reply_markup=_city_keyboard(),
+@router.message(OrderState.waiting_for_city_branch, F.text)
+async def city_branch_handler(message: Message, state: FSMContext):
+    await message.delete()
+    await state.update_data(city_branch=message.text.strip())
+    await state.set_state(OrderState.waiting_for_confirmation)
+
+    d = await state.get_data()
+    summary = (
+        "<b>📝 Проверьте данные заказа:</b>\n\n"
+        f"📦 Товар: <b>{d['product_name']}</b>\n"
+        f"💰 Цена: {d['product_price']}\n"
+        f"👤 Имя: {d['name']}\n"
+        f"📱 Телефон: {d['phone']}\n"
+        f"📦 Доставка: {d['city_branch']}"
     )
+
+    await update_step(message, state, "step_confirm.jpg", summary, confirm_kb())
+
+
+# ===================== BACK =====================
+
+@router.callback_query(F.data == "order:back:name")
+async def back_name(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(OrderState.waiting_for_name)
+    d = await state.get_data()
+    await update_step(cb, state, "step_name.jpg", "👤 Введите имя получателя.", name_kb())
+    await cb.answer()
 
 
 @router.callback_query(F.data == "order:back:phone")
-async def back_to_phone_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
+async def back_phone(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_phone)
-    data = await state.get_data()
-
-    await callback_query.message.bot.edit_message_text(
-        chat_id=callback_query.message.chat.id,
-        message_id=data.get("message_id", callback_query.message.message_id),
-        text=(
-            f"Вы выбрали: <b>{data.get('product_name', '')}</b>.\n\n"
-            "📞 Укажите номер телефона для связи."
-        ),
-        reply_markup=_phone_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback_query.answer()
+    await update_step(cb, state, "step_phone.jpg", "📞 Укажите номер телефона.", phone_kb())
+    await cb.answer()
 
 
-@router.callback_query(F.data == "order:back:name")
-async def back_to_name_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(OrderState.waiting_for_name)
-    data = await state.get_data()
-
-    await callback_query.message.bot.edit_message_text(
-        chat_id=callback_query.message.chat.id,
-        message_id=data.get("message_id", callback_query.message.message_id),
-        text=(
-            f"Вы выбрали: <b>{data.get('product_name', '')}</b>.\n\n"
-            "👤 Введите имя получателя."
-        ),
-        reply_markup=_name_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback_query.answer()
-
-
-@router.callback_query(F.data == "order:back:city")
-async def back_to_city_callback(callback_query: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data == "order:back:city_branch")
+async def back_city(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_city_branch)
-
-    await callback_query.message.bot.edit_message_text(
-        chat_id=callback_query.message.chat.id,
-        message_id=(await state.get_data())["message_id"],
-        text="Введите город и отделение одним сообщением",
-        reply_markup=_city_keyboard(),
-    )
-    await callback_query.answer()
+    await update_step(cb, state, "step_city_branch.jpg", "Введите город и отделение.", city_branch_kb())
+    await cb.answer()
 
 
-@router.message(OrderState.waiting_for_city_branch, F.text)
-async def city_branch_handler(message: Message, state: FSMContext) -> None:
-    city_branch = message.text.strip()
-    if not city_branch:
-        await message.answer("Введите город и отделение одним сообщением.")
-        return
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    await state.update_data(city_branch=city_branch)
-    await _show_confirmation(message, state)
-
-
+# ===================== SUBMIT =====================
 @router.callback_query(F.data == "order:submit")
-async def submit_order_callback(
-    callback_query: CallbackQuery,
+async def submit_order(
+    callback: CallbackQuery,
     state: FSMContext,
     customer_service: CustomerService,
     crm_client: LPCRMClient,
-) -> None:
-
+):
     data = await state.get_data()
+    user = callback.from_user
 
-    user = callback_query.from_user
+    raw_delivery = data.get("city_branch", "").strip()
 
-    product_id = data.get("product_id", "")
-    product_price = data.get("product_price", "")
-    name = data.get("name", "")
-    phone = data.get("phone", "")
-    city_branch = data.get("city_branch", "")
+    # ✅ корректно разделяем
+    if "," in raw_delivery:
+        city, post_office = map(str.strip, raw_delivery.split(",", 1))
+    else:
+        city = raw_delivery
+        post_office = ""
 
-    if user:
-        await customer_service.save_or_update(
-            telegram_id=user.id,
-            name=name,
-            phone=phone,
-            city=city_branch,
-            post_office=city_branch,
-        )
-
-    if user:
-        crm_order_id = f"{product_id}-{user.id}"
-        try:
-            await crm_client.send_order(
-                order_id=crm_order_id,
-                country="UA",
-                site="telegram-bot",
-                buyer_name=name or user.full_name or user.first_name or user.username or "Telegram User",
-                phone=phone,
-                comment="Order from Telegram bot",
-                product_id=product_id,
-                price=product_price,
-            )
-        except Exception:
-            logger.exception("Failed to send order %s to LP-CRM", crm_order_id)
-
-    try:
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    await callback_query.message.answer(
-        "✅ Заказ оформлен! Мы свяжемся с вами для подтверждения."
+    # ---- сохраняем в БД уже ЧИСТО ----
+    await customer_service.save_or_update(
+        telegram_id=user.id,
+        name=data["name"],
+        phone=data["phone"],
+        city=city,
+        post_office=post_office,
     )
 
-    await state.clear()
-    await callback_query.answer()
+    # ---- красиво формируем для CRM ----
+    delivery_parts = []
+    if city:
+        delivery_parts.append(city)
+    if post_office:
+        delivery_parts.append(post_office)
 
+    delivery_text = ", ".join(delivery_parts)
+
+    try:
+        await crm_client.send_order(
+            order_id=f"{data['product_id']}-{user.id}",
+            country="UA",
+            site="telegram-bot",
+            buyer_name=data["name"],
+            phone=data["phone"],
+            comment=f"Delivery: {delivery_text}",
+            product_id=data["product_id"],
+            price=data["product_price"],
+        )
+    except Exception:
+        logger.exception("CRM error")
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("✅ Заказ оформлен!")
+    await state.clear()
+    await callback.answer()
+
+
+
+# ===================== CANCEL =====================
 
 @router.callback_query(StateFilter(OrderState), F.data == "cancel_order")
-async def cancel_from_order_callback(
-    callback_query: CallbackQuery,
+async def cancel_order(
+    callback: CallbackQuery,
     state: FSMContext,
     product_service: ProductService,
-) -> None:
+):
+    await state.clear()
+    await cancel_order_callback(callback, product_service)
+
+@router.callback_query(F.data == "order:back:product")
+async def back_to_product_card(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not callback.message:
+        return
+
+    data = await state.get_data()
+    chat_id = callback.message.chat.id
+    message_id = data.get("message_id", callback.message.message_id)
+
+    product = get_selected_product(chat_id, message_id)
+    if not product:
+        await callback.answer("Товар не найден", show_alert=True)
+        return
 
     await state.clear()
-    await cancel_order_callback(callback_query, product_service)
+
+    caption = (
+        f"<b>{product.name}</b>\n"
+        f"{product.description}\n\n"
+        f"Цена: {product.price}"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🛒 Оформить заказ", callback_data="confirm_order")
+    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.adjust(1)
+
+    try:
+        await callback.message.bot.edit_message_media(
+            chat_id=chat_id,
+            message_id=message_id,
+            media=InputMediaPhoto(
+                media=product.photo_url,
+                caption=caption,
+                parse_mode="HTML",
+            ),
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        # fallback если фото не меняется
+        await callback.message.bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+    await callback.answer()
+
+@router.callback_query(F.data == "order:confirm_existing")
+async def confirm_existing_order(
+    callback: CallbackQuery,
+    state: FSMContext,
+    customer_service: CustomerService,
+    crm_client: LPCRMClient,
+):
+    data = await state.get_data()
+    customer = await customer_service.get_customer(callback.from_user.id)
+
+    if not customer:
+        await callback.answer("Данные не найдены", show_alert=True)
+        return
+
+    await crm_client.send_order(
+        order_id=f"{data['product_id']}-{callback.from_user.id}",
+        country="UA",
+        site="telegram-bot",
+        buyer_name=customer["name"],
+        phone=customer["phone"],
+        comment=f"Delivery: {customer.get('city')}",
+        product_id=data["product_id"],
+        price=data["product_price"],
+    )
+
+    await callback.message.edit_reply_markup(None)
+    await callback.message.answer("✅ Заказ оформлен!")
+    await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "order:edit_existing")
+async def edit_existing_data(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    await state.set_state(OrderState.waiting_for_name)
+    await update_step(
+        callback,
+        state,
+        "step_name.jpg",
+        "👤 Введите имя получателя.",
+        name_kb(),
+    )
+    await callback.answer()
