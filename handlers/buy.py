@@ -128,7 +128,7 @@ async def buy_product_callback(
 
     # fallback — если его нет среди карточек
     if product is None:
-        products = await product_service.get_products(limit=5)
+        products = await product_service.get_products()
         for item in products:
             if item.id == product_id:
                 product = item
@@ -189,7 +189,7 @@ async def cancel_order_callback(
 
     reset_product_cards(chat_id)
 
-    products = await product_service.get_products(limit=5)
+    products = await product_service.get_products()
 
     for product in products:
         sent_message = await callback_query.message.bot.send_photo(
