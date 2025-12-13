@@ -23,12 +23,14 @@ class SheetRow:
     description: str
     photo_url: str
     price: str
+    is_promo: bool
 
     @classmethod
     def from_sequence(cls, values: Sequence[str]) -> "SheetRow":
-        # Ensure we always have exactly five fields.
-        padded = list(values) + [""] * (5 - len(values))
-        return cls(*padded[:5])
+        # Ensure we always have exactly six fields.
+        padded = list(values) + [""] * (6 - len(values))
+        is_promo = str(padded[5]).upper() == "TRUE"
+        return cls(*padded[:5], is_promo)
 
 
 class SheetsClient:
@@ -83,4 +85,8 @@ class SheetsClient:
         """Fetch all rows (excluding header) from the worksheet."""
 
         data_rows = await self.fetch_raw_rows(skip_header=True)
-        return [SheetRow.from_sequence(row) for row in data_rows]
+        return [
+            row
+            for row in (SheetRow.from_sequence(row) for row in data_rows)
+            if row.is_promo
+        ]
