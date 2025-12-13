@@ -41,11 +41,15 @@ class ProductService:
         products = await self.get_products(limit=1)
         return products[0] if products else None
 
-    async def get_products(self, limit: int = 3) -> List[Product]:
-        """Return first N products from the cached dataset."""
+    async def get_products(self, limit: int | None = None) -> List[Product]:
+        """Return cached products, optionally limited to the first ``limit`` items."""
 
         if not self._cache:
             await self.update_cache()
+
+        if limit is None:
+            return list(self._cache)
+
         return self._cache[:limit]
 
     async def update_cache(self) -> None:
