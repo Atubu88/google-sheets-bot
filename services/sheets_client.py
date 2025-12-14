@@ -81,6 +81,12 @@ class SheetsClient:
         worksheet = await self._get_worksheet()
         await asyncio.to_thread(worksheet.append_row, list(values))
 
+    async def update_cell(self, row: int, col: int, value: str) -> None:
+        """Update a specific cell in the worksheet."""
+
+        worksheet = await self._get_worksheet()
+        await asyncio.to_thread(worksheet.update_cell, row, col, value)
+
     async def fetch_rows(self) -> List[SheetRow]:
         """Fetch all rows (excluding header) from the worksheet."""
 
