@@ -16,12 +16,14 @@ from config import get_settings
 from handlers import buy
 from handlers import order
 from handlers import start
+from handlers import admin
 from middlewares.deps import DependencyMiddleware
 from services.crm_client import LPCRMClient
 from services.customer_service import CustomerService
 from services.product_service import ProductService
 from services.promo_scheduler import promo_tick
 from services.promo_settings_service import PromoSettingsService
+from services.settings_service import SettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
 
@@ -71,6 +73,7 @@ def build_dependencies() -> dict[str, object]:
     promo_settings_service = PromoSettingsService(promo_settings_client)
     customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(api_key=settings.crm_api_key, base_url=settings.crm_base_url)
+    settings_service = SettingsService(settings.customers_db_path)
     return {
         "settings": settings,
         "product_service": product_service,
@@ -78,6 +81,7 @@ def build_dependencies() -> dict[str, object]:
         "promo_settings_service": promo_settings_service,
         "customer_service": customer_service,
         "crm_client": crm_client,
+        "settings_service": settings_service,
     }
 
 logger = configure_logging()
@@ -90,6 +94,7 @@ async def main() -> None:
     promo_settings_service = deps["promo_settings_service"]
     customer_service = deps["customer_service"]
     crm_client = deps["crm_client"]
+    settings_service = deps["settings_service"]
 
     bot = Bot(
         token=settings.bot_token,
@@ -104,11 +109,13 @@ async def main() -> None:
         user_service=user_service,
         customer_service=customer_service,
         crm_client=crm_client,
+        settings_service=settings_service,
     ))
 
     dp.include_router(start.router)
     dp.include_router(buy.router)
     dp.include_router(order.router)
+    dp.include_router(admin.router)
 
     logger.info("Starting background cache updater")
     cache_task = asyncio.create_task(
