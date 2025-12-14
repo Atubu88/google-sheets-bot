@@ -23,6 +23,7 @@ from handlers.buy import cancel_order_callback, get_selected_product
 from services.product_service import ProductService
 from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
+from services.settings_service import SettingsService
 
 
 router = Router()
@@ -157,6 +158,37 @@ async def update_step(
             )
     except Exception:
         logger.exception("Failed to update step %s", image_name)
+
+
+async def notify_orders_group(
+    bot,
+    settings_service: SettingsService,
+    *,
+    name: str,
+    phone: str,
+    product_name: str,
+    product_price: str,
+    delivery: str,
+) -> None:
+    """Send order summary to configured group if available."""
+
+    orders_group_id = await settings_service.get("orders_group_id")
+    if not orders_group_id:
+        return
+
+    summary = (
+        "🆕 Новый заказ\n"
+        f"👤 Клиент: {name}\n"
+        f"📱 Телефон: {phone}\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Цена: {product_price}\n"
+        f"🏙️ Город/Отделение: {delivery}"
+    )
+
+    try:
+        await bot.send_message(chat_id=int(orders_group_id), text=summary)
+    except Exception:
+        logger.exception("Failed to send order summary to group %s", orders_group_id)
 
 
 # ===================== FLOW START =====================
@@ -339,6 +371,7 @@ async def submit_order(
     state: FSMContext,
     customer_service: CustomerService,
     crm_client: LPCRMClient,
+    settings_service: SettingsService,
 ):
     data = await state.get_data()
     user = callback.from_user
@@ -383,6 +416,16 @@ async def submit_order(
         )
     except Exception:
         logger.exception("CRM error")
+
+    await notify_orders_group(
+        callback.message.bot,
+        settings_service,
+        name=data["name"],
+        phone=data["phone"],
+        product_name=data["product_name"],
+        product_price=str(data["product_price"]),
+        delivery=delivery_text or "-",
+    )
 
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("✅ Заказ оформлен!")
@@ -461,6 +504,7 @@ async def confirm_existing_order(
     state: FSMContext,
     customer_service: CustomerService,
     crm_client: LPCRMClient,
+    settings_service: SettingsService,
 ):
     data = await state.get_data()
     customer = await customer_service.get_customer(callback.from_user.id)
@@ -469,15 +513,36 @@ async def confirm_existing_order(
         await callback.answer("Данные не найдены", show_alert=True)
         return
 
+    delivery_parts = []
+    city = (customer.get("city") or "").strip()
+    post_office = (customer.get("post_office") or "").strip()
+
+    if city:
+        delivery_parts.append(city)
+    if post_office:
+        delivery_parts.append(post_office)
+
+    delivery_text = ", ".join(delivery_parts)
+
     await crm_client.send_order(
         order_id=f"{data['product_id']}-{callback.from_user.id}",
         country="UA",
         site="telegram-bot",
         buyer_name=customer["name"],
         phone=customer["phone"],
-        comment=f"Delivery: {customer.get('city')}",
+        comment=f"Delivery: {delivery_text}",
         product_id=data["product_id"],
         price=data["product_price"],
+    )
+
+    await notify_orders_group(
+        callback.message.bot,
+        settings_service,
+        name=customer["name"],
+        phone=customer["phone"],
+        product_name=data["product_name"],
+        product_price=str(data["product_price"]),
+        delivery=delivery_text or "-",
     )
 
     await callback.message.edit_reply_markup(None)
