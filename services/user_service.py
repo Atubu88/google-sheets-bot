@@ -51,3 +51,20 @@ class UserService:
             ]
         )
         return True
+
+    async def get_chat_ids(self) -> list[int]:
+        """Return all chat IDs stored in the worksheet."""
+
+        rows = await self._sheets_client.fetch_raw_rows(skip_header=True)
+        chat_ids: list[int] = []
+
+        for row in rows:
+            if len(row) < 2:
+                continue
+
+            try:
+                chat_ids.append(int(row[1]))
+            except (TypeError, ValueError):
+                continue
+
+        return chat_ids
