@@ -20,6 +20,7 @@ class SheetRow:
 
     id: str
     name: str
+    short_desc: str
     description: str
     photo_url: str
     price: str
@@ -27,10 +28,10 @@ class SheetRow:
 
     @classmethod
     def from_sequence(cls, values: Sequence[str]) -> "SheetRow":
-        # Ensure we always have exactly six fields.
-        padded = list(values) + [""] * (6 - len(values))
-        is_promo = str(padded[5]).upper() == "TRUE"
-        return cls(*padded[:5], is_promo)
+        # Ensure we always have exactly seven fields.
+        padded = list(values) + [""] * (7 - len(values))
+        is_promo = str(padded[6]).upper() == "TRUE"
+        return cls(*padded[:6], is_promo)
 
 
 class SheetsClient:
