@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from aiogram import Bot
 
-from handlers.buy import remember_product_card, reset_product_cards, _build_buy_keyboard, _build_product_caption
+from handlers.buy import remember_product_card, reset_product_cards, _build_buy_keyboard, build_product_caption
 from services.product_service import ProductService
 from services.promo_settings_service import PromoSettingsService
 from services.user_service import UserService
@@ -21,7 +21,7 @@ async def _send_products_to_chat(bot: Bot, chat_id: int, products) -> None:
         message = await bot.send_photo(
             chat_id=chat_id,
             photo=product.photo_url,
-            caption=_build_product_caption(product),
+            caption=build_product_caption(product),
             parse_mode="HTML",
             reply_markup=_build_buy_keyboard(product),
         )
