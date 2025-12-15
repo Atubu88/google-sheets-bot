@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -23,15 +23,26 @@ class SheetRow:
     short_desc: str
     description: str
     photo_url: str
+    old_price: Optional[str]
     price: str
     is_promo: bool
 
     @classmethod
     def from_sequence(cls, values: Sequence[str]) -> "SheetRow":
-        # Ensure we always have exactly seven fields.
-        padded = list(values) + [""] * (7 - len(values))
-        is_promo = str(padded[6]).upper() == "TRUE"
-        return cls(*padded[:6], is_promo)
+        # Ensure we always have exactly eight fields.
+        padded = list(values) + [""] * (8 - len(values))
+        old_price = padded[5].strip() or None
+        is_promo = str(padded[7]).upper() == "TRUE"
+        return cls(
+            id=padded[0],
+            name=padded[1],
+            short_desc=padded[2],
+            description=padded[3],
+            photo_url=padded[4],
+            old_price=old_price,
+            price=padded[6],
+            is_promo=is_promo,
+        )
 
 
 class SheetsClient:
