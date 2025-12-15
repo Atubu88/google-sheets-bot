@@ -76,18 +76,25 @@ def _build_description_link(description: str) -> str:
     if not description:
         return ""
 
-    return f'<a href="{description}">📖 Подробнее</a>'
+    return f'<a href="{description}">Подробнее</a>'
 
 
 def build_product_caption(product: Product) -> str:
     description_link = _build_description_link(product.description)
 
-    caption = f"<b>{product.name}</b>\n\nЦена: {product.price}"
+    lines: list[str] = [f"<b>{product.name}</b>", ""]
 
     if description_link:
-        caption += f"\n\n{description_link}"
+        short_desc = product.short_desc.strip()
+        if short_desc:
+            lines.append(f"{short_desc} {description_link}")
+        else:
+            lines.append(f"📖 {description_link}")
+        lines.append("")
 
-    return caption
+    lines.append(f"Цена: {product.price}")
+
+    return "\n".join(lines)
 
 
 def _build_buy_keyboard(product: Product):
