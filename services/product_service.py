@@ -14,6 +14,7 @@ from .sheets_client import SheetRow, SheetsClient
 class Product:
     id: str
     name: str
+    short_desc: str
     description: str
     photo_url: str
     price: str
@@ -109,6 +110,7 @@ class ProductService:
         return Product(
             id=row.id,
             name=row.name,
+            short_desc=row.short_desc,
             description=row.description,
             photo_url=row.photo_url,
             price=row.price,
