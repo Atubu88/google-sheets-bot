@@ -24,6 +24,7 @@ from services.product_service import ProductService
 from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
 from services.settings_service import SettingsService
+from services.after_order_promo import send_after_order_promo
 
 
 router = Router()
@@ -435,6 +436,10 @@ async def submit_order(
 
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("✅ Заказ оформлен!")
+    await send_after_order_promo(
+        callback.message.bot,
+        callback.message.chat.id,
+    )
     await state.clear()
     await callback.answer()
 
