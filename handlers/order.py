@@ -252,7 +252,7 @@ async def confirm_order_callback(
         callback,
         state,
         "step_name.jpg",
-        f"✨ Вы выбрали: <b>{product.name}</b>\n\n👤 Введите имя получателя.",
+        f"✨ Вы выбрали: <b>{product.name}</b>\n\n👤 Укажите имя и фамилию получателя посылки",
         name_kb(),
     )
     await callback.answer()
@@ -346,7 +346,13 @@ async def city_branch_handler(message: Message, state: FSMContext):
 async def back_name(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_name)
     d = await state.get_data()
-    await update_step(cb, state, "step_name.jpg", "👤 Введите имя получателя.", name_kb())
+    await update_step(
+        cb,
+        state,
+        "step_name.jpg",
+        "👤 Укажите имя и фамилию получателя посылки",
+        name_kb(),
+    )
     await cb.answer()
 
 
@@ -557,7 +563,7 @@ async def edit_existing_data(
         callback,
         state,
         "step_name.jpg",
-        "👤 Введите имя получателя.",
+        "👤 Укажите имя и фамилию получателя посылки",
         name_kb(),
     )
     await callback.answer()
