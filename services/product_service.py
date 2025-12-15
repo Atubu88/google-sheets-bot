@@ -17,6 +17,7 @@ class Product:
     short_desc: str
     description: str
     photo_url: str
+    old_price: str | None
     price: str
 
 
@@ -113,5 +114,6 @@ class ProductService:
             short_desc=row.short_desc,
             description=row.description,
             photo_url=row.photo_url,
+            old_price=row.old_price,
             price=row.price,
         )
