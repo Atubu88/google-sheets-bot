@@ -79,6 +79,13 @@ def _build_description_link(description: str) -> str:
     return f'<a href="{description}">Подробнее</a>'
 
 
+def build_price_block(price: str, old_price: str | None) -> str:
+    if old_price:
+        return f"<s>Цена: {old_price}</s>\nЦена со скидкой: <b>{price}</b>"
+
+    return f"Цена: <b>{price}</b>"
+
+
 def build_product_caption(product: Product) -> str:
     description_link = _build_description_link(product.description)
 
@@ -92,7 +99,7 @@ def build_product_caption(product: Product) -> str:
             lines.append(f"📖 {description_link}")
         lines.append("")
 
-    lines.append(f"Цена: {product.price}")
+    lines.append(build_price_block(product.price, product.old_price))
 
     return "\n".join(lines)
 
