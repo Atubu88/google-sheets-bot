@@ -150,6 +150,16 @@ async def buy_product_callback(
         return
 
     # --- 🆕 НЕ удаляем карточки товаров ---
+    # 🆕 Сообщение перед карточкой
+    await callback_query.message.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "🎉 Отличный выбор!\n"
+            f"📦 <b>{product.name}</b>\n"
+            "Готовы оформить заказ? ⬇️"
+        ),
+        parse_mode="HTML",
+    )
 
     # --- 🆕 Создаём новое сообщение-карточку товара ---
     caption = build_product_caption(product)
