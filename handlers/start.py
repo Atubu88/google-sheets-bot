@@ -9,7 +9,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from handlers.buy import remember_product_card, reset_product_cards
+from handlers.buy import build_product_caption, remember_product_card, reset_product_cards
 from services.product_service import ProductService, Product
 from services.user_service import UserService
 from handlers.buy import remember_welcome_message
@@ -20,17 +20,16 @@ router = Router()
 
 async def _send_product_card(message: Message, product: Product) -> Message:
     """Send a single product card."""
-    caption = (
-        f"<b>{product.name}</b>\n"
-        f"{product.description}\n\n"
-        f"Цена: {product.price}"
-    )
+    caption = build_product_caption(product)
 
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Купить", callback_data=f"buy:{product.id}")
 
     sent_message = await message.answer_photo(
-        photo=product.photo_url, caption=caption, reply_markup=keyboard.as_markup()
+        photo=product.photo_url,
+        caption=caption,
+        reply_markup=keyboard.as_markup(),
+        parse_mode="HTML",
     )
 
     return sent_message

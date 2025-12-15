@@ -71,12 +71,23 @@ async def delete_welcome_message(chat_id: int, bot):
 
 
 
-def _build_product_caption(product: Product) -> str:
-    return (
-        f"<b>{product.name}</b>\n"
-        f"{product.description}\n\n"
-        f"Цена: {product.price}"
-    )
+def _build_description_link(description: str) -> str:
+    description = description.strip()
+    if not description:
+        return ""
+
+    return f'<a href="{description}">📖 Подробнее</a>'
+
+
+def build_product_caption(product: Product) -> str:
+    description_link = _build_description_link(product.description)
+
+    caption = f"<b>{product.name}</b>\n\nЦена: {product.price}"
+
+    if description_link:
+        caption += f"\n\n{description_link}"
+
+    return caption
 
 
 def _build_buy_keyboard(product: Product):
@@ -141,11 +152,7 @@ async def buy_product_callback(
     # --- 🆕 НЕ удаляем карточки товаров ---
 
     # --- 🆕 Создаём новое сообщение-карточку товара ---
-    caption = (
-        f"<b>{product.name}</b>\n"
-        f"{product.description}\n\n"
-        f"Цена: {product.price}"
-    )
+    caption = build_product_caption(product)
 
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="🛒 Оформить заказ", callback_data="confirm_order")
@@ -195,7 +202,7 @@ async def cancel_order_callback(
         sent_message = await callback_query.message.bot.send_photo(
             chat_id=chat_id,
             photo=product.photo_url,
-            caption=_build_product_caption(product),
+            caption=build_product_caption(product),
             parse_mode="HTML",
             reply_markup=_build_buy_keyboard(product),
         )
