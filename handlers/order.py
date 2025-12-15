@@ -19,7 +19,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from handlers.buy import cancel_order_callback, get_selected_product
+from handlers.buy import build_product_caption, cancel_order_callback, get_selected_product
 from services.product_service import ProductService
 from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
@@ -464,11 +464,7 @@ async def back_to_product_card(
 
     await state.clear()
 
-    caption = (
-        f"<b>{product.name}</b>\n"
-        f"{product.description}\n\n"
-        f"Цена: {product.price}"
-    )
+    caption = build_product_caption(product)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🛒 Оформить заказ", callback_data="confirm_order")
