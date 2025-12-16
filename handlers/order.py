@@ -19,7 +19,12 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from handlers.buy import build_product_caption, cancel_order_callback, get_selected_product
+from handlers.buy import (
+    build_product_caption,
+    cancel_order_callback,
+    format_price,
+    get_selected_product,
+)
 from services.product_service import ProductService
 from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
@@ -213,6 +218,7 @@ async def confirm_order_callback(
         product_id=product.id,
         product_name=product.name,
         product_price=product.price,
+        formatted_price=format_price(product.price),
     )
 
     customer = await customer_service.get_customer(callback.from_user.id)
@@ -332,7 +338,7 @@ async def city_branch_handler(message: Message, state: FSMContext):
     summary = (
         "<b>📝 Проверьте данные заказа:</b>\n\n"
         f"📦 Товар: <b>{d['product_name']}</b>\n"
-        f"💰 Цена: {d['product_price']}\n"
+        f"💰 Цена: {d['formatted_price']}\n"
         f"👤 Имя: {d['name']}\n"
         f"📱 Телефон: {d['phone']}\n"
         f"📦 Доставка: {d['city_branch']}"
@@ -430,7 +436,7 @@ async def submit_order(
         name=data["name"],
         phone=data["phone"],
         product_name=data["product_name"],
-        product_price=str(data["product_price"]),
+        product_price=data["formatted_price"],
         delivery=delivery_text or "-",
     )
 
@@ -548,7 +554,7 @@ async def confirm_existing_order(
         name=customer["name"],
         phone=customer["phone"],
         product_name=data["product_name"],
-        product_price=str(data["product_price"]),
+        product_price=data["formatted_price"],
         delivery=delivery_text or "-",
     )
 

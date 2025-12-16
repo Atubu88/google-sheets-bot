@@ -79,11 +79,23 @@ def _build_description_link(description: str) -> str:
     return f'<a href="{description}">Подробнее</a>'
 
 
-def build_price_block(price: str, old_price: str | None) -> str:
-    if old_price:
-        return f"<s>Цена: {old_price}</s>\nЦена со скидкой: <b>{price}</b>"
+def format_price(price: str) -> str:
+    """Append currency to price for client-facing messages."""
 
-    return f"Цена: <b>{price}</b>"
+    return f"{price} грн"
+
+
+def build_price_block(price: str, old_price: str | None) -> str:
+    formatted_price = format_price(price)
+
+    if old_price:
+        formatted_old_price = format_price(old_price)
+        return (
+            f"<s>Цена: {formatted_old_price}</s>\n"
+            f"Цена со скидкой: <b>{formatted_price}</b>"
+        )
+
+    return f"Цена: <b>{formatted_price}</b>"
 
 
 def build_product_caption(product: Product) -> str:
