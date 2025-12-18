@@ -72,7 +72,11 @@ def build_dependencies() -> dict[str, object]:
     )
     promo_settings_service = PromoSettingsService(promo_settings_client)
     customer_service = CustomerService(settings.customers_db_path)
-    crm_client = LPCRMClient(api_key=settings.crm_api_key, base_url=settings.crm_base_url)
+    crm_client = LPCRMClient(
+        api_key=settings.crm_api_key,
+        base_url=settings.crm_base_url,
+        office_id=settings.crm_office_id,
+    )
     settings_service = SettingsService(settings.customers_db_path)
     return {
         "settings": settings,
