@@ -11,9 +11,10 @@ import aiohttp
 class LPCRMClient:
     """Lightweight HTTP client for LP-CRM order creation."""
 
-    def __init__(self, *, api_key: str, base_url: str) -> None:
+    def __init__(self, *, api_key: str, base_url: str, office_id: int) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._office_id = office_id
         self._logger = logging.getLogger(self.__class__.__name__)
 
     async def send_order(
@@ -38,6 +39,7 @@ class LPCRMClient:
             "bayer_name": buyer_name,
             "phone": phone,
             "comment": comment,
+            "office": self._office_id,
             "products": self._serialize_products(product_id, price),
         }
 
