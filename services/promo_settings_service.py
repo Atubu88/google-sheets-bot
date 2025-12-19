@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from services.sheets_client import SheetsClient
@@ -18,6 +19,8 @@ class PromoSettings:
 
 class PromoSettingsService:
     """Read and update promo settings stored in Google Sheets."""
+
+    _kyiv_tz = ZoneInfo("Europe/Kyiv")
 
     def __init__(self, sheets_client: SheetsClient):
         self._sheets_client = sheets_client
@@ -41,7 +44,11 @@ class PromoSettingsService:
 
     async def update_last_sent_at(self, value: datetime) -> None:
         # Header row is 1, data row is 2, last_sent_at column is 4
-        await self._sheets_client.update_cell(2, 4, value.isoformat())
+        await self._sheets_client.update_cell(
+            2,
+            4,
+            value.astimezone(timezone.utc).isoformat(),
+        )
 
     def _parse_send_time(self, value: str) -> time:
         try:
@@ -64,15 +71,21 @@ class PromoSettingsService:
         return parsed
 
     def should_send_now(self, settings: PromoSettings, now: datetime) -> bool:
+        now = now.astimezone(self._kyiv_tz)
         if not settings.enabled:
             return False
 
-        today_send_time = datetime.combine(now.date(), settings.send_time, tzinfo=timezone.utc)
+        today_send_time = datetime.combine(
+            now.date(),
+            settings.send_time,
+            tzinfo=self._kyiv_tz,
+        )
         if now < today_send_time:
             return False
 
         if settings.last_sent_at is not None:
-            next_allowed = settings.last_sent_at + timedelta(days=settings.interval_days)
+            last_sent = settings.last_sent_at.astimezone(self._kyiv_tz)
+            next_allowed = last_sent + timedelta(days=settings.interval_days)
             if now < next_allowed:
                 return False
 

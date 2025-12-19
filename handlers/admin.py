@@ -17,4 +17,4 @@ async def set_orders_group(message: Message, settings_service: SettingsService) 
 
     chat_id = message.chat.id
     await settings_service.set("orders_group_id", str(chat_id))
-    await message.answer("✅ Группа для заказов успешно сохранена")
+    await message.answer("✅ Групу для замовлень успішно збережено")

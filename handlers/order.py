@@ -30,6 +30,9 @@ from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
 from services.settings_service import SettingsService
 from services.after_order_promo import send_after_order_promo
+from utils.phone import normalize_ua_phone
+from pathlib import Path
+
 
 
 router = Router()
@@ -52,18 +55,19 @@ class OrderState(StatesGroup):
 def name_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data="order:back:product")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
     return kb.as_markup()
 
 
 def confirm_existing_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Подтвердить заказ", callback_data="order:confirm_existing")
-    kb.button(text="✏️ Изменить данные", callback_data="order:edit_existing")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="✅ Підтвердити замовлення", callback_data="order:confirm_existing")
+    kb.button(text="✏️ Змінити дані", callback_data="order:edit_existing")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
     return kb.as_markup()
+
 
 async def go_to_city_branch_step(
     source: Message,
@@ -76,21 +80,20 @@ async def go_to_city_branch_step(
         state,
         "step_city_branch.jpg",
         (
-            "📦 Введите город и номер отделения одним сообщением.\n\n"
-            "Пример:\n"
-            "Киев, отделение №7"
+            "📦 Вкажіть місто та відділення одним повідомленням.\n\n"
+            "Наприклад:\n"
+            "Київ №7"
         ),
         city_branch_kb(),
     )
 
 
-
 def phone_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📱 Отправить контакт", callback_data="order:contact")
-    kb.button(text="✏️ Ввести вручную", callback_data="order:manual_phone")
+    kb.button(text="📱 Надіслати контакт", callback_data="order:contact")
+    kb.button(text="✏️ Ввести вручну", callback_data="order:manual_phone")
     kb.button(text="◀️ Назад", callback_data="order:back:name")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -98,18 +101,19 @@ def phone_kb() -> InlineKeyboardMarkup:
 def city_branch_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data="order:back:phone")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
     return kb.as_markup()
 
 
 def confirm_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Подтвердить", callback_data="order:submit")
+    kb.button(text="✅ Підтвердити", callback_data="order:submit")
     kb.button(text="◀️ Назад", callback_data="order:back:city_branch")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
     return kb.as_markup()
+
 
 
 # ===================== CORE UPDATE =====================
@@ -183,12 +187,12 @@ async def notify_orders_group(
         return
 
     summary = (
-        "🆕 Новый заказ\n"
-        f"👤 Клиент: {name}\n"
+        "🆕 Нове замовлення\n"
+        f"👤 Клієнт: {name}\n"
         f"📱 Телефон: {phone}\n"
         f"📦 Товар: {product_name}\n"
-        f"💰 Цена: {product_price}\n"
-        f"🏙️ Город/Отделение: {delivery}"
+        f"💰 Ціна: {product_price}\n"
+        f"🏙️ Місто / Відділення: {delivery}"
     )
 
     try:
@@ -198,7 +202,6 @@ async def notify_orders_group(
 
 
 # ===================== FLOW START =====================
-
 @router.callback_query(F.data == "confirm_order")
 async def confirm_order_callback(
     callback: CallbackQuery,
@@ -209,7 +212,7 @@ async def confirm_order_callback(
     product = get_selected_product(chat_id, callback.message.message_id)
 
     if not product:
-        await callback.answer("Товар не найден", show_alert=True)
+        await callback.answer("Товар не знайдено", show_alert=True)
         return
 
     await state.clear()
@@ -223,24 +226,24 @@ async def confirm_order_callback(
 
     customer = await customer_service.get_customer(callback.from_user.id)
 
-    # ✅ ВТОРОЙ КОНТАКТ
+    # ✅ ПОВТОРНИЙ КОНТАКТ
     if customer:
         city = (customer.get("city") or "").strip()
         post_office = (customer.get("post_office") or "").strip()
 
-        # 🧼 защита от дублей старых данных
+        # 🧼 захист від дублю старих даних
         if post_office and post_office == city:
             post_office = ""
 
         delivery = ", ".join(filter(None, [city, post_office]))
 
         text = (
-            f"✨ Вы выбрали: <b>{product.name}</b>\n\n"
-            "Мы нашли ваши данные:\n"
-            f"👤 Имя: {customer.get('name')}\n"
+            f"✨ Ви обрали: <b>{product.name}</b>\n\n"
+            "Ми знайшли ваші дані:\n"
+            f"👤 Імʼя: {customer.get('name')}\n"
             f"📱 Телефон: {customer.get('phone')}\n"
             f"📦 Доставка: {delivery}\n\n"
-            "Использовать эти данные?"
+            "Використати ці дані?"
         )
 
         await update_step(
@@ -253,16 +256,17 @@ async def confirm_order_callback(
         await callback.answer()
         return
 
-    # 🆕 ПЕРВЫЙ КОНТАКТ
+    # 🆕 ПЕРШИЙ КОНТАКТ
     await state.set_state(OrderState.waiting_for_name)
     await update_step(
         callback,
         state,
         "step_name.jpg",
-        f"✨ Вы выбрали: <b>{product.name}</b>\n\n👤 Укажите имя и фамилию получателя посылки",
+        f"✨ Ви обрали: <b>{product.name}</b>\n\n👤 Вкажіть імʼя та прізвище отримувача посилки",
         name_kb(),
     )
     await callback.answer()
+
 
 
 
@@ -283,7 +287,7 @@ async def name_handler(message: Message, state: FSMContext):
         message,
         state,
         "step_phone.jpg",
-        f"Вы выбрали: <b>{data['product_name']}</b>\n\n📞 Укажите номер телефона.",
+        f"Ви обрали: <b>{data['product_name']}</b>\n\n📞 Вкажіть номер телефону.",
         phone_kb(),
     )
 
@@ -293,11 +297,11 @@ async def name_handler(message: Message, state: FSMContext):
 @router.callback_query(F.data == "order:contact")
 async def phone_contact_request(callback: CallbackQuery, state: FSMContext):
     kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
+        keyboard=[[KeyboardButton(text="📱 Поділитися номером", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-    sent = await callback.message.answer("Отправьте контакт:", reply_markup=kb)
+    sent = await callback.message.answer("Надішліть контакт:", reply_markup=kb)
     await state.update_data(contact_prompt_id=sent.message_id)
     await callback.answer()
 
@@ -318,12 +322,32 @@ async def phone_contact_handler(message: Message, state: FSMContext):
     await go_to_city_branch_step(message, state)
 
 
+
 @router.message(OrderState.waiting_for_phone, F.text)
 async def phone_text_handler(message: Message, state: FSMContext):
-    await message.delete()
-    await state.update_data(phone=message.text.strip())
+    raw_phone = message.text.strip()
+    phone = normalize_ua_phone(raw_phone)
 
+    await message.delete()
+
+    if not phone:
+        await update_step(
+            message,
+            state,
+            "step_phone.jpg",
+            (
+                "❌ <b>Невірний номер телефону</b>\n\n"
+                "Введіть номер у зручному для вас форматі.\n"
+                "Наприклад:\n"
+                "<b>+380501234567</b> або <b>0501234567</b>"
+            ),
+            phone_kb(),
+        )
+        return
+
+    await state.update_data(phone=phone)
     await go_to_city_branch_step(message, state)
+
 
 
 # ===================== CITY =====================
@@ -336,10 +360,10 @@ async def city_branch_handler(message: Message, state: FSMContext):
 
     d = await state.get_data()
     summary = (
-        "<b>📝 Проверьте данные заказа:</b>\n\n"
+        "<b>📝 Перевірте дані замовлення:</b>\n\n"
         f"📦 Товар: <b>{d['product_name']}</b>\n"
-        f"💰 Цена: {d['formatted_price']}\n"
-        f"👤 Имя: {d['name']}\n"
+        f"💰 Ціна: {d['formatted_price']}\n"
+        f"👤 Імʼя: {d['name']}\n"
         f"📱 Телефон: {d['phone']}\n"
         f"📦 Доставка: {d['city_branch']}"
     )
@@ -348,7 +372,6 @@ async def city_branch_handler(message: Message, state: FSMContext):
 
 
 # ===================== BACK =====================
-
 @router.callback_query(F.data == "order:back:name")
 async def back_name(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_name)
@@ -357,24 +380,42 @@ async def back_name(cb: CallbackQuery, state: FSMContext):
         cb,
         state,
         "step_name.jpg",
-        "👤 Укажите имя и фамилию получателя посылки",
+        "👤 Вкажіть імʼя та прізвище отримувача посилки",
         name_kb(),
     )
     await cb.answer()
 
 
+@router.callback_query(F.data == "order:manual_phone")
+async def manual_phone(cb: CallbackQuery):
+    await cb.answer("Введіть номер телефону текстом 👇")
+
+
 @router.callback_query(F.data == "order:back:phone")
 async def back_phone(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_phone)
-    await update_step(cb, state, "step_phone.jpg", "📞 Укажите номер телефона.", phone_kb())
+    await update_step(
+        cb,
+        state,
+        "step_phone.jpg",
+        "📞 Вкажіть номер телефону.",
+        phone_kb(),
+    )
     await cb.answer()
 
 
 @router.callback_query(F.data == "order:back:city_branch")
 async def back_city(cb: CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_city_branch)
-    await update_step(cb, state, "step_city_branch.jpg", "Введите город и отделение.", city_branch_kb())
+    await update_step(
+        cb,
+        state,
+        "step_city_branch.jpg",
+        "📦 Вкажіть місто та відділення.",
+        city_branch_kb(),
+    )
     await cb.answer()
+
 
 
 # ===================== SUBMIT =====================
@@ -441,7 +482,7 @@ async def submit_order(
     )
 
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("✅ Заказ оформлен!")
+    await callback.message.answer("✅ Замовлення успішно оформлено!")
     await send_after_order_promo(
         callback.message.bot,
         callback.message.chat.id,
@@ -462,6 +503,7 @@ async def cancel_order(
     await state.clear()
     await cancel_order_callback(callback, product_service)
 
+
 @router.callback_query(F.data == "order:back:product")
 async def back_to_product_card(
     callback: CallbackQuery,
@@ -476,7 +518,7 @@ async def back_to_product_card(
 
     product = get_selected_product(chat_id, message_id)
     if not product:
-        await callback.answer("Товар не найден", show_alert=True)
+        await callback.answer("Товар не знайдено", show_alert=True)
         return
 
     await state.clear()
@@ -484,23 +526,24 @@ async def back_to_product_card(
     caption = build_product_caption(product)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🛒 Оформить заказ", callback_data="confirm_order")
-    kb.button(text="❌ Отмена", callback_data="cancel_order")
+    kb.button(text="🛒 Оформити замовлення", callback_data="confirm_order")
+    kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
+
+    banner_path = IMAGES_DIR / "step_order_confirm.jpg"
 
     try:
         await callback.message.bot.edit_message_media(
             chat_id=chat_id,
             message_id=message_id,
             media=InputMediaPhoto(
-                media=product.photo_url,
+                media=FSInputFile(banner_path),
                 caption=caption,
                 parse_mode="HTML",
             ),
             reply_markup=kb.as_markup(),
         )
     except Exception:
-        # fallback если фото не меняется
         await callback.message.bot.edit_message_caption(
             chat_id=chat_id,
             message_id=message_id,
@@ -510,6 +553,7 @@ async def back_to_product_card(
         )
 
     await callback.answer()
+
 
 @router.callback_query(F.data == "order:confirm_existing")
 async def confirm_existing_order(
@@ -523,7 +567,7 @@ async def confirm_existing_order(
     customer = await customer_service.get_customer(callback.from_user.id)
 
     if not customer:
-        await callback.answer("Данные не найдены", show_alert=True)
+        await callback.answer("Не вдалося знайти дані", show_alert=True)
         return
 
     delivery_parts = []
@@ -559,7 +603,7 @@ async def confirm_existing_order(
     )
 
     await callback.message.edit_reply_markup(None)
-    await callback.message.answer("✅ Заказ оформлен!")
+    await callback.message.answer("✅ Замовлення успішно оформлено!")
     await state.clear()
     await callback.answer()
 
@@ -574,7 +618,7 @@ async def edit_existing_data(
         callback,
         state,
         "step_name.jpg",
-        "👤 Укажите имя и фамилию получателя посылки",
+        "👤 Вкажіть імʼя та прізвище отримувача посилки",
         name_kb(),
     )
     await callback.answer()

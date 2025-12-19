@@ -23,7 +23,7 @@ async def _send_product_card(message: Message, product: Product) -> Message:
     caption = build_product_caption(product)
 
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Купить", callback_data=f"buy:{product.id}")
+    keyboard.button(text="Купити", callback_data=f"buy:{product.id}")
 
     sent_message = await message.answer_photo(
         photo=product.photo_url,
@@ -43,7 +43,7 @@ async def start_handler(
 
     user = message.from_user
 
-    # --- Фоновая запись пользователя в Google ---
+    # --- Фоновий запис користувача ---
     if user is not None:
         asyncio.create_task(
             user_service.ensure_user_record(
@@ -55,7 +55,7 @@ async def start_handler(
             )
         )
 
-    # --- Определяем имя для приветствия ---
+    # --- Визначаємо імʼя для привітання ---
     if user:
         name = user.first_name or (f"@{user.username}" if user.username else "")
     else:
@@ -63,32 +63,30 @@ async def start_handler(
 
     name_part = f", {name}" if name else ""
 
-    # --- Мгновенное приветствие ---
+    # --- Миттєве привітання ---
     welcome_msg = await message.answer(
         f"""
-    👋 Добро пожаловать{name_part}!
-    Мы подготовили для вас лучшие акции сегодня.
-    Выберите товар ниже и оформите заказ в несколько кликов ⬇️
+👋 Вітаємо{name_part}!
+Ми підготували для вас найкращі акції сьогодні.
+Оберіть товар нижче та оформіть замовлення у кілька кліків ⬇️
         """.strip()
     )
 
-    # NEW
     remember_welcome_message(message.chat.id, welcome_msg.message_id)
 
-    # --- Получаем товары ---
+    # --- Отримуємо товари ---
     products = await product_service.get_products()
 
     if not products:
-        await message.answer("Пока нет доступных товаров. Загляните позже!")
+        await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
         return
 
-    # --- Задержка перед показом товаров ---
+    # --- Затримка перед показом товарів ---
     await asyncio.sleep(1.5)
 
-    # --- Отправка карточек товаров ---
+    # --- Надсилання карток товарів ---
     reset_product_cards(message.chat.id)
 
     for product in products:
         sent_message = await _send_product_card(message, product)
         remember_product_card(message.chat.id, product, sent_message.message_id)
-
