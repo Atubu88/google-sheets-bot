@@ -46,7 +46,6 @@ class SheetRow:
             is_promo=is_promo,
         )
 
-
 class SheetsClient:
     """A minimal wrapper around gspread for reading data asynchronously."""
 
@@ -67,7 +66,6 @@ class SheetsClient:
             "https://www.googleapis.com/auth/drive",
         ]
 
-        # Railway / prod: credentials из env
         if "GOOGLE_SERVICE_ACCOUNT_JSON" in os.environ:
             service_account_info = json.loads(
                 os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
@@ -77,13 +75,25 @@ class SheetsClient:
                 scopes=scopes,
             )
         else:
-            # Локально: credentials из файла
             credentials = Credentials.from_service_account_file(
                 str(self._service_account_file),
                 scopes=scopes,
             )
 
         return gspread.authorize(credentials)
+
+    async def _get_worksheet(self) -> gspread.Worksheet:
+        if self._client is None:
+            self._client = await asyncio.to_thread(self._build_client)
+
+        spreadsheet = await asyncio.to_thread(
+            self._client.open_by_url,
+            f"https://docs.google.com/spreadsheets/d/{self._spreadsheet_id}",
+        )
+        return await asyncio.to_thread(
+            spreadsheet.worksheet,
+            self._worksheet_name,
+        )
 
 
     async def fetch_raw_rows(self, *, skip_header: bool = True) -> list[list[str]]:
