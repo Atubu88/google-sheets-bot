@@ -12,6 +12,8 @@ from typing import List, Optional, Sequence
 
 import gspread
 from google.oauth2.service_account import Credentials
+import os
+import json
 
 
 @dataclass
@@ -60,31 +62,29 @@ class SheetsClient:
         self._client: gspread.Client | None = None
 
     def _build_client(self) -> gspread.Client:
-        # Универсальные scopes: чтение + запись + стабильная работа с Drive
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
 
-        credentials = Credentials.from_service_account_file(
-            str(self._service_account_file),
-            scopes=scopes,
-        )
+        # Railway / prod: credentials из env
+        if "GOOGLE_SERVICE_ACCOUNT_JSON" in os.environ:
+            service_account_info = json.loads(
+                os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+            )
+            credentials = Credentials.from_service_account_info(
+                service_account_info,
+                scopes=scopes,
+            )
+        else:
+            # Локально: credentials из файла
+            credentials = Credentials.from_service_account_file(
+                str(self._service_account_file),
+                scopes=scopes,
+            )
+
         return gspread.authorize(credentials)
 
-    async def _get_worksheet(self) -> gspread.Worksheet:
-        if self._client is None:
-            self._client = await asyncio.to_thread(self._build_client)
-
-        # Используем open_by_url — самый устойчивый вариант между аккаунтами
-        spreadsheet = await asyncio.to_thread(
-            self._client.open_by_url,
-            f"https://docs.google.com/spreadsheets/d/{self._spreadsheet_id}",
-        )
-        return await asyncio.to_thread(
-            spreadsheet.worksheet,
-            self._worksheet_name,
-        )
 
     async def fetch_raw_rows(self, *, skip_header: bool = True) -> list[list[str]]:
         """Fetch raw rows from the worksheet.
