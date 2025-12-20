@@ -133,7 +133,7 @@ async def main() -> None:
     scheduler.add_job(
         promo_tick,
         "interval",
-        hours=1,
+        minutes=5,
         args=(bot, product_service, user_service, promo_settings_service),
     )
     scheduler.start()
