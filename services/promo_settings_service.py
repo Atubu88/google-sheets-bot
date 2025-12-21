@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
 
@@ -14,7 +14,7 @@ class PromoSettings:
     enabled: bool
     interval_days: int
     send_time: time
-    last_sent_at: Optional[datetime]
+    last_sent_date: Optional[date]
 
 
 class PromoSettingsService:
@@ -33,21 +33,21 @@ class PromoSettingsService:
         interval_days = int(row[1]) if len(row) > 1 and str(row[1]).isdigit() else 0
         send_time_str = row[2] if len(row) > 2 else "00:00"
         send_time = self._parse_send_time(send_time_str)
-        last_sent_at = self._parse_last_sent_at(row[3] if len(row) > 3 else "")
+        last_sent_date = self._parse_last_sent_date(row[3] if len(row) > 3 else "")
 
         return PromoSettings(
             enabled=enabled,
             interval_days=interval_days,
             send_time=send_time,
-            last_sent_at=last_sent_at,
+            last_sent_date=last_sent_date,
         )
 
-    async def update_last_sent_at(self, value: datetime) -> None:
-        # Header row is 1, data row is 2, last_sent_at column is 4
+    async def update_last_sent_date(self, value: date) -> None:
+        # Header row is 1, data row is 2, last_sent_date column is 4
         await self._sheets_client.update_cell(
             2,
             4,
-            value.astimezone(timezone.utc).isoformat(),
+            value.isoformat(),
         )
 
     def _parse_send_time(self, value: str) -> time:
@@ -57,36 +57,49 @@ class PromoSettingsService:
         except Exception:
             return time(0, 0)
 
-    def _parse_last_sent_at(self, value: str) -> Optional[datetime]:
+    def _parse_last_sent_date(self, value: str) -> Optional[date]:
         if not value:
             return None
 
         try:
-            parsed = datetime.fromisoformat(value)
+            parsed_date = date.fromisoformat(value)
+        except Exception:
+            parsed_date = None
+
+        if parsed_date is not None:
+            return parsed_date
+
+        try:
+            parsed_datetime = datetime.fromisoformat(value)
         except Exception:
             return None
 
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
+        if parsed_datetime.tzinfo is None:
+            parsed_datetime = parsed_datetime.replace(tzinfo=timezone.utc)
+        return parsed_datetime.astimezone(self._kyiv_tz).date()
 
     def should_send_now(self, settings: PromoSettings, now: datetime) -> bool:
         now = now.astimezone(self._kyiv_tz)
         if not settings.enabled:
             return False
 
+        today = now.date()
         today_send_time = datetime.combine(
-            now.date(),
+            today,
             settings.send_time,
             tzinfo=self._kyiv_tz,
         )
         if now < today_send_time:
             return False
 
-        if settings.last_sent_at is not None:
-            last_sent = settings.last_sent_at.astimezone(self._kyiv_tz)
-            next_allowed = last_sent + timedelta(days=settings.interval_days)
-            if now < next_allowed:
-                return False
+        if settings.last_sent_date is None:
+            return True
+
+        if settings.last_sent_date == today:
+            return False
+
+        next_allowed = settings.last_sent_date + timedelta(days=settings.interval_days)
+        if today < next_allowed:
+            return False
 
         return True

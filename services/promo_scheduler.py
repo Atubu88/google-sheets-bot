@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -77,8 +77,8 @@ async def promo_tick(
     await asyncio.gather(*send_tasks, return_exceptions=True)
 
     try:
-        await promo_settings_service.update_last_sent_at(now.astimezone(timezone.utc))
+        await promo_settings_service.update_last_sent_date(now.date())
     except Exception:
-        logger.exception("Failed to update last_sent_at after promo broadcast")
+        logger.exception("Failed to update last_sent_date after promo broadcast")
     else:
-        logger.info("Promo broadcast finished and timestamp updated")
+        logger.info("Promo broadcast finished and date updated")
