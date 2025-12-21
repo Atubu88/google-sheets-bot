@@ -21,6 +21,13 @@ class PromoSettingsService:
     """Read and update promo settings stored in Google Sheets."""
 
     _kyiv_tz = ZoneInfo("Europe/Kyiv")
+    _data_row = 2
+    _col_enabled = 1
+    _col_interval_days = 2
+    _col_send_time = 3
+    _col_last_sent_at = 4
+    _col_last_interval_days = 5
+    _col_last_send_time = 6
 
     def __init__(self, sheets_client: SheetsClient):
         self._sheets_client = sheets_client
@@ -30,10 +37,37 @@ class PromoSettingsService:
         row = rows[0] if rows else []
 
         enabled = str(row[0]).upper() == "TRUE" if len(row) > 0 else False
-        interval_days = int(row[1]) if len(row) > 1 and str(row[1]).isdigit() else 0
+        interval_days = self._parse_interval_days(row[1] if len(row) > 1 else "")
         send_time_str = row[2] if len(row) > 2 else "00:00"
         send_time = self._parse_send_time(send_time_str)
         last_sent_at = self._parse_last_sent_at(row[3] if len(row) > 3 else "")
+        stored_interval_days = self._parse_interval_days(
+            row[4] if len(row) > 4 else ""
+        )
+        stored_send_time = self._parse_send_time(
+            row[5] if len(row) > 5 else ""
+        )
+
+        if (
+            stored_interval_days != interval_days
+            or stored_send_time != send_time
+        ):
+            await self._sheets_client.update_cell(
+                self._data_row,
+                self._col_last_sent_at,
+                "",
+            )
+            await self._sheets_client.update_cell(
+                self._data_row,
+                self._col_last_interval_days,
+                str(interval_days),
+            )
+            await self._sheets_client.update_cell(
+                self._data_row,
+                self._col_last_send_time,
+                send_time.strftime("%H:%M"),
+            )
+            last_sent_at = None
 
         return PromoSettings(
             enabled=enabled,
@@ -43,12 +77,14 @@ class PromoSettingsService:
         )
 
     async def update_last_sent_at(self, value: datetime) -> None:
-        # Header row is 1, data row is 2, last_sent_at column is 4
         await self._sheets_client.update_cell(
-            2,
-            4,
+            self._data_row,
+            self._col_last_sent_at,
             value.astimezone(timezone.utc).isoformat(),
         )
+
+    def _parse_interval_days(self, value: str) -> int:
+        return int(value) if str(value).isdigit() else 0
 
     def _parse_send_time(self, value: str) -> time:
         try:
