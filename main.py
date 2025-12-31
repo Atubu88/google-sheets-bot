@@ -55,14 +55,19 @@ async def health():
     return {"status": "ok"}
 
 
-# ✅ Telegram webhook
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    logger.info("📩 Webhook received")
     data = await request.json()
     update = Update.model_validate(data)
-    await app.state.dp.feed_update(app.state.bot, update)
+
+    # 🔥 НЕ ЖДЁМ ОБРАБОТКУ
+    asyncio.create_task(
+        app.state.dp.feed_update(app.state.bot, update)
+    )
+
+    # ⚡ МГНОВЕННЫЙ ОТВЕТ TELEGRAM
     return {"ok": True}
+
 
 
 # --------------------------------------------------
