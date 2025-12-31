@@ -141,17 +141,7 @@ async def on_startup():
     )
     app.state.cache_task = cache_task
 
-    # ---- WEBHOOK (SAFE) ----
-    webhook_base_url = os.getenv("WEBHOOK_BASE_URL")
-    if webhook_base_url:
-        webhook_url = f"{webhook_base_url}/webhook"
-        try:
-            await bot.set_webhook(webhook_url)
-            logger.info("✅ Webhook ensured: %s", webhook_url)
-        except TelegramNetworkError as e:
-            logger.error("⚠️ Webhook setup failed (will retry later): %s", e)
-    else:
-        logger.warning("WEBHOOK_BASE_URL not set")
+
 
 
 # --------------------------------------------------
