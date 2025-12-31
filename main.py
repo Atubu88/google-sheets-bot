@@ -97,10 +97,11 @@ async def on_startup():
     )
     customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(
-        settings.crm_api_key,
-        settings.crm_base_url,
-        settings.crm_office_id,
+        api_key=settings.crm_api_key,
+        base_url=settings.crm_base_url,
+        office_id=settings.crm_office_id,
     )
+
     settings_service = SettingsService(settings.customers_db_path)
 
     dp.update.middleware(
