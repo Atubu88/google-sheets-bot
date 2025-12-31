@@ -39,7 +39,6 @@ async def _send_product_card(message: Message, product: Product) -> Message:
 async def start_handler(
     message: Message, product_service: ProductService, user_service: UserService
 ) -> None:
-    """Entry point for new users with dependency injection."""
 
     user = message.from_user
 
@@ -55,15 +54,11 @@ async def start_handler(
             )
         )
 
-    # --- Визначаємо імʼя для привітання ---
-    if user:
-        name = user.first_name or (f"@{user.username}" if user.username else "")
-    else:
-        name = ""
-
+    # --- Імʼя ---
+    name = user.first_name if user and user.first_name else ""
     name_part = f", {name}" if name else ""
 
-    # --- Миттєве привітання ---
+    # --- МИТТЄВА відповідь (ВАЖНО ДЛЯ WEBHOOK) ---
     welcome_msg = await message.answer(
         f"""
 👋 Вітаємо{name_part}!
@@ -74,19 +69,19 @@ async def start_handler(
 
     remember_welcome_message(message.chat.id, welcome_msg.message_id)
 
-    # --- Отримуємо товари ---
-    products = await product_service.get_products()
+    # --- ВЕСЬ ПОКАЗ ТОВАРІВ У ФОН ---
+    async def send_products():
+        products = await product_service.get_products()
 
-    if not products:
-        await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
-        return
+        if not products:
+            await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
+            return
 
-    # --- Затримка перед показом товарів ---
-    await asyncio.sleep(1.5)
+        reset_product_cards(message.chat.id)
 
-    # --- Надсилання карток товарів ---
-    reset_product_cards(message.chat.id)
+        for product in products:
+            sent_message = await _send_product_card(message, product)
+            remember_product_card(message.chat.id, product, sent_message.message_id)
 
-    for product in products:
-        sent_message = await _send_product_card(message, product)
-        remember_product_card(message.chat.id, product, sent_message.message_id)
+    asyncio.create_task(send_products())
+
