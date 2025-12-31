@@ -27,15 +27,14 @@ from services.settings_service import SettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
 
+
 def configure_logging(level: int = logging.INFO) -> logging.Logger:
     root = logging.getLogger()
     root.setLevel(level)
 
-    # Удаляем любые старые хендлеры, чтобы избежать дублирования и конфликтов
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    # Создаём handler, который пишет в stdout
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -43,7 +42,6 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
     root.addHandler(handler)
 
-    # Настраиваем уровни библиотек
     logging.getLogger("aiogram").setLevel(level)
     logging.getLogger("aiohttp").setLevel(level)
 
@@ -52,6 +50,7 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
 def build_dependencies() -> dict[str, object]:
     settings = get_settings()
+
     product_sheets_client = SheetsClient(
         service_account_file=settings.service_account_file,
         spreadsheet_id=settings.spreadsheet_id,
@@ -65,12 +64,14 @@ def build_dependencies() -> dict[str, object]:
 
     product_service = ProductService(product_sheets_client)
     user_service = UserService(user_sheets_client)
+
     promo_settings_client = SheetsClient(
         service_account_file=settings.service_account_file,
         spreadsheet_id=settings.spreadsheet_id,
         worksheet_name=settings.promo_settings_worksheet,
     )
     promo_settings_service = PromoSettingsService(promo_settings_client)
+
     customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(
         api_key=settings.crm_api_key,
@@ -78,6 +79,7 @@ def build_dependencies() -> dict[str, object]:
         office_id=settings.crm_office_id,
     )
     settings_service = SettingsService(settings.customers_db_path)
+
     return {
         "settings": settings,
         "product_service": product_service,
@@ -88,11 +90,14 @@ def build_dependencies() -> dict[str, object]:
         "settings_service": settings_service,
     }
 
+
 logger = configure_logging()
+
 
 async def main() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
+
     product_service = deps["product_service"]
     user_service = deps["user_service"]
     promo_settings_service = deps["promo_settings_service"]
@@ -102,19 +107,24 @@ async def main() -> None:
 
     bot = Bot(
         token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
     dp = Dispatcher(storage=MemoryStorage())
 
+    # 🔴 ВАЖНО: гарантируем, что webhook выключен
+    await bot.delete_webhook(drop_pending_updates=True)
+
     # DI middleware
-    dp.update.middleware(DependencyMiddleware(
-        product_service=product_service,
-        user_service=user_service,
-        customer_service=customer_service,
-        crm_client=crm_client,
-        settings_service=settings_service,
-    ))
+    dp.update.middleware(
+        DependencyMiddleware(
+            product_service=product_service,
+            user_service=user_service,
+            customer_service=customer_service,
+            crm_client=crm_client,
+            settings_service=settings_service,
+        )
+    )
 
     dp.include_router(start.router)
     dp.include_router(buy.router)
@@ -128,7 +138,7 @@ async def main() -> None:
         )
     )
 
-    logger.info("Starting bot")
+    logger.info("Starting scheduler")
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         promo_tick,
@@ -137,8 +147,20 @@ async def main() -> None:
         args=(bot, product_service, user_service, promo_settings_service),
     )
     scheduler.start()
+
+    logger.info("Starting polling (Railway safe mode)")
+
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(
+            bot,
+            polling_timeout=10,               # 🔴 КЛЮЧЕВАЯ ПРАВКА
+            allowed_updates=[
+                "message",
+                "callback_query",
+                "edited_message",
+            ],                                # 🔴 уменьшаем нагрузку
+            handle_signals=False,             # 🔴 важно для Railway
+        )
     finally:
         scheduler.shutdown(wait=False)
         cache_task.cancel()
