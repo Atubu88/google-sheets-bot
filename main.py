@@ -9,6 +9,7 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession  # ✅ ВАЖНО
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
@@ -72,8 +73,14 @@ async def telegram_webhook(request: Request):
 async def on_startup():
     settings = get_settings()
 
+    # 🔥 КРИТИЧЕСКАЯ ЧАСТЬ — HTTP SESSION
+    session = AiohttpSession(
+        timeout=30,  # ⬅️ решает TelegramNetworkError на Railway
+    )
+
     bot = Bot(
         token=settings.bot_token,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
