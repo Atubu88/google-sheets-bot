@@ -78,11 +78,17 @@ async def telegram_webhook(request: Request):
 async def on_startup():
     settings = get_settings()
 
+    import socket
+    import aiohttp
+    from aiogram.client.session.aiohttp import AiohttpSession
+
+    connector = aiohttp.TCPConnector(
+        family=socket.AF_INET  # ⬅️ ЖЁСТКО IPv4
+    )
+
     session = AiohttpSession(
         timeout=30,
-        connector_kwargs={
-            "family": socket.AF_INET  # ⬅️ ТОЛЬКО IPv4
-        }
+        connector=connector,
     )
 
     bot = Bot(
