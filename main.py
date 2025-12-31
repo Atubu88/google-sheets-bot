@@ -1,4 +1,4 @@
-"""Main entrypoint for the Telegram bot (Webhook + Railway, FINAL)."""
+"""Main entrypoint for the Telegram bot (Webhook + Railway, STABLE)."""
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +58,7 @@ async def health():
 # ✅ Telegram webhook
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    logger.info("📩 Webhook received from Telegram")
+    logger.info("📩 Webhook received")
     data = await request.json()
     update = Update.model_validate(data)
     await app.state.dp.feed_update(app.state.bot, update)
@@ -91,6 +91,7 @@ async def on_startup():
             settings.worksheet_name,
         )
     )
+
     user_service = UserService(
         SheetsClient(
             settings.service_account_file,
@@ -98,6 +99,7 @@ async def on_startup():
             settings.users_worksheet,
         )
     )
+
     promo_settings_service = PromoSettingsService(
         SheetsClient(
             settings.service_account_file,
@@ -105,14 +107,18 @@ async def on_startup():
             settings.promo_settings_worksheet,
         )
     )
+
     customer_service = CustomerService(settings.customers_db_path)
+
     crm_client = LPCRMClient(
         api_key=settings.crm_api_key,
         base_url=settings.crm_base_url,
         office_id=settings.crm_office_id,
     )
+
     settings_service = SettingsService(settings.customers_db_path)
 
+    # ---- MIDDLEWARE ----
     dp.update.middleware(
         DependencyMiddleware(
             product_service=product_service,
@@ -123,6 +129,7 @@ async def on_startup():
         )
     )
 
+    # ---- ROUTERS ----
     dp.include_router(start.router)
     dp.include_router(buy.router)
     dp.include_router(order.router)
@@ -131,7 +138,7 @@ async def on_startup():
     app.state.bot = bot
     app.state.dp = dp
 
-    # ---- Scheduler ----
+    # ---- SCHEDULER ----
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         promo_tick,
@@ -142,7 +149,7 @@ async def on_startup():
     scheduler.start()
     app.state.scheduler = scheduler
 
-    # ---- Cache ----
+    # ---- CACHE ----
     cache_task = asyncio.create_task(
         product_service.background_updater(
             settings.cache_update_interval_minutes
@@ -150,14 +157,22 @@ async def on_startup():
     )
     app.state.cache_task = cache_task
 
-    # 🔥 ГЛАВНОЕ — гарантируем webhook
+    # ---- WEBHOOK (NON-BLOCKING) ----
     webhook_base = os.getenv("WEBHOOK_BASE_URL")
+
     if not webhook_base:
         raise RuntimeError("WEBHOOK_BASE_URL is not set")
 
     webhook_url = f"{webhook_base}/webhook"
-    await bot.set_webhook(webhook_url)
-    logger.info("✅ Webhook set to %s", webhook_url)
+
+    async def ensure_webhook():
+        try:
+            await bot.set_webhook(webhook_url)
+            logger.info("✅ Webhook set to %s", webhook_url)
+        except Exception as e:
+            logger.error("⚠️ Webhook setup failed: %s", e)
+
+    asyncio.create_task(ensure_webhook())
 
     logger.info("✅ Startup completed")
 
