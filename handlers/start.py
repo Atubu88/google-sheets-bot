@@ -9,62 +9,59 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from handlers.buy import build_product_caption, remember_product_card, reset_product_cards
+from handlers.buy import (
+    build_product_caption,
+    remember_product_card,
+    reset_product_cards,
+    remember_welcome_message,
+)
 from services.product_service import ProductService, Product
 from services.user_service import UserService
-from handlers.buy import remember_welcome_message
 
 
 router = Router()
 
 
 async def _send_product_card(message: Message, product: Product) -> Message:
-    """Send a single product card."""
-    caption = build_product_caption(product)
-
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Купити", callback_data=f"buy:{product.id}")
 
-    sent_message = await message.answer_photo(
+    return await message.answer_photo(
         photo=product.photo_url,
-        caption=caption,
+        caption=build_product_caption(product),
         reply_markup=keyboard.as_markup(),
         parse_mode="HTML",
     )
 
-    return sent_message
-
 
 @router.message(CommandStart())
 async def start_handler(
-    message: Message, product_service: ProductService, user_service: UserService
+    message: Message,
+    product_service: ProductService,
+    user_service: UserService,
 ) -> None:
-    """Entry point for new users with dependency injection."""
-
     user = message.from_user
 
-    # --- Фоновий запис користувача ---
-    if user is not None:
-        asyncio.create_task(
-            user_service.ensure_user_record(
-                user_id=user.id,
-                chat_id=message.chat.id,
-                username=user.username,
-                first_name=user.first_name,
-                created_at=datetime.now(timezone.utc),
-            )
-        )
-
-    # --- Визначаємо імʼя для привітання ---
+    # --- Сохраняем пользователя В ФОНЕ (и не ломаем webhook) ---
     if user:
-        name = user.first_name or (f"@{user.username}" if user.username else "")
-    else:
-        name = ""
+        async def safe_save():
+            try:
+                await user_service.ensure_user_record(
+                    user_id=user.id,
+                    chat_id=message.chat.id,
+                    username=user.username,
+                    first_name=user.first_name,
+                    created_at=datetime.now(timezone.utc),
+                )
+            except Exception:
+                pass  # важно: не роняем webhook
 
+        asyncio.create_task(safe_save())
+
+    name = user.first_name if user and user.first_name else ""
     name_part = f", {name}" if name else ""
 
-    # --- Миттєве привітання ---
-    welcome_msg = await message.answer(
+    welcome = await message.answer(
         f"""
 👋 Вітаємо{name_part}!
 Ми підготували для вас найкращі акції сьогодні.
@@ -72,21 +69,19 @@ async def start_handler(
         """.strip()
     )
 
-    remember_welcome_message(message.chat.id, welcome_msg.message_id)
+    remember_welcome_message(message.chat.id, welcome.message_id)
 
-    # --- Отримуємо товари ---
-    products = await product_service.get_products()
+    # 🔥 ВАЖНО: берём ТОЛЬКО из cache
+    products = product_service.get_products()
 
     if not products:
         await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
         return
 
-    # --- Затримка перед показом товарів ---
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(1.0)
 
-    # --- Надсилання карток товарів ---
     reset_product_cards(message.chat.id)
 
     for product in products:
-        sent_message = await _send_product_card(message, product)
-        remember_product_card(message.chat.id, product, sent_message.message_id)
+        msg = await _send_product_card(message, product)
+        remember_product_card(message.chat.id, product, msg.message_id)

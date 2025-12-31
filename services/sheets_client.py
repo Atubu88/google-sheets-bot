@@ -18,8 +18,6 @@ import json
 
 @dataclass
 class SheetRow:
-    """Typed representation of a row returned from Google Sheets."""
-
     id: str
     name: str
     short_desc: str
@@ -31,24 +29,20 @@ class SheetRow:
 
     @classmethod
     def from_sequence(cls, values: Sequence[str]) -> "SheetRow":
-        # Ensure we always have exactly eight fields.
         padded = list(values) + [""] * (8 - len(values))
-        old_price = padded[5].strip() or None
-        is_promo = str(padded[7]).upper() == "TRUE"
         return cls(
             id=padded[0],
             name=padded[1],
             short_desc=padded[2],
             description=padded[3],
             photo_url=padded[4],
-            old_price=old_price,
+            old_price=padded[5].strip() or None,
             price=padded[6],
-            is_promo=is_promo,
+            is_promo=str(padded[7]).upper() == "TRUE",
         )
 
-class SheetsClient:
-    """A minimal wrapper around gspread for reading data asynchronously."""
 
+class SheetsClient:
     def __init__(
         self,
         service_account_file: Path,
@@ -67,11 +61,8 @@ class SheetsClient:
         ]
 
         if "GOOGLE_SERVICE_ACCOUNT_JSON" in os.environ:
-            service_account_info = json.loads(
-                os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
-            )
             credentials = Credentials.from_service_account_info(
-                service_account_info,
+                json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]),
                 scopes=scopes,
             )
         else:
@@ -90,54 +81,31 @@ class SheetsClient:
             self._client.open_by_url,
             f"https://docs.google.com/spreadsheets/d/{self._spreadsheet_id}",
         )
+
         return await asyncio.to_thread(
             spreadsheet.worksheet,
             self._worksheet_name,
         )
 
-
     async def fetch_raw_rows(self, *, skip_header: bool = True) -> list[list[str]]:
-        """Fetch raw rows from the worksheet.
-
-        Args:
-            skip_header: Whether to exclude the first header row from the
-                returned dataset.
-        """
         worksheet = await self._get_worksheet()
-        raw_rows: list[list[str]] = await asyncio.to_thread(
+        rows: list[list[str]] = await asyncio.to_thread(
             worksheet.get_all_values
         )
 
-        if not raw_rows:
-            return []
+        if skip_header and rows:
+            return rows[1:]
 
-        if skip_header:
-            return raw_rows[1:]
-        return raw_rows
-
-    async def append_row(self, values: Sequence[str]) -> None:
-        """Append a row to the worksheet."""
-        worksheet = await self._get_worksheet()
-        await asyncio.to_thread(
-            worksheet.append_row,
-            list(values),
-        )
-
-    async def update_cell(self, row: int, col: int, value: str) -> None:
-        """Update a specific cell in the worksheet."""
-        worksheet = await self._get_worksheet()
-        await asyncio.to_thread(
-            worksheet.update_cell,
-            row,
-            col,
-            value,
-        )
+        return rows
 
     async def fetch_rows(self) -> List[SheetRow]:
-        """Fetch all rows (excluding header) from the worksheet."""
-        data_rows = await self.fetch_raw_rows(skip_header=True)
-        return [
-            row
-            for row in (SheetRow.from_sequence(row) for row in data_rows)
-            if row.is_promo
-        ]
+        raw_rows = await self.fetch_raw_rows(skip_header=True)
+        return [SheetRow.from_sequence(row) for row in raw_rows]
+
+    async def append_row(self, values: Sequence[str]) -> None:
+        worksheet = await self._get_worksheet()
+        await asyncio.to_thread(worksheet.append_row, list(values))
+
+    async def update_cell(self, row: int, col: int, value: str) -> None:
+        worksheet = await self._get_worksheet()
+        await asyncio.to_thread(worksheet.update_cell, row, col, value)
