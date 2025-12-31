@@ -12,10 +12,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
-from aiogram.exceptions import TelegramNetworkError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 from fastapi import FastAPI, Request
 
 from config import get_settings
@@ -50,8 +48,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 
+# ✅ HEALTHCHECK (ОБЯЗАТЕЛЬНО ДЛЯ RAILWAY)
+@app.get("/")
+async def health():
+    return {"status": "ok"}
+
+
+# ✅ TELEGRAM WEBHOOK
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
+    logger.info("📩 Webhook received from Telegram")
     data = await request.json()
     update = Update.model_validate(data)
     await app.state.dp.feed_update(app.state.bot, update)
@@ -101,9 +107,9 @@ async def on_startup():
         base_url=settings.crm_base_url,
         office_id=settings.crm_office_id,
     )
-
     settings_service = SettingsService(settings.customers_db_path)
 
+    # ---- MIDDLEWARE ----
     dp.update.middleware(
         DependencyMiddleware(
             product_service=product_service,
@@ -114,6 +120,7 @@ async def on_startup():
         )
     )
 
+    # ---- ROUTERS ----
     dp.include_router(start.router)
     dp.include_router(buy.router)
     dp.include_router(order.router)
@@ -141,7 +148,7 @@ async def on_startup():
     )
     app.state.cache_task = cache_task
 
-
+    logger.info("✅ Application startup completed")
 
 
 # --------------------------------------------------
@@ -159,6 +166,13 @@ async def on_shutdown():
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
+
+    logger.info("🛑 Application shutdown completed")
+
+
+# --------------------------------------------------
+# ENTRYPOINT
+# --------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
