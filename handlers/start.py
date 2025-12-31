@@ -72,7 +72,8 @@ async def start_handler(
     remember_welcome_message(message.chat.id, welcome.message_id)
 
     # 🔥 ВАЖНО: берём ТОЛЬКО из cache
-    products = product_service.get_products()
+    products = await product_service.get_products()
+
 
     if not products:
         await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
