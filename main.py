@@ -140,9 +140,6 @@ async def startup() -> None:
     dp.include_router(order.router)
     dp.include_router(admin.router)
 
-    # 🔴 ВАЖНО
-    await dp.startup(bot)
-
     app.state.bot = bot
     app.state.dp = dp
 
@@ -185,11 +182,6 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    dp = getattr(app.state, "dp", None)
-    bot = getattr(app.state, "bot", None)
-    if dp and bot:
-        await dp.shutdown(bot)
-
     scheduler = getattr(app.state, "scheduler", None)
     if scheduler:
         scheduler.shutdown(wait=False)
