@@ -5,9 +5,11 @@ import asyncio
 import contextlib
 import logging
 import sys
+import inspect  # 🔴 ВАЖНО
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -105,14 +107,26 @@ async def main() -> None:
     crm_client = deps["crm_client"]
     settings_service = deps["settings_service"]
 
+    # 🔴 КРОСС-СОВМЕСТИМЫЙ HTTP SESSION
+    session_kwargs = {
+        "timeout": 20,
+    }
+
+    # use_ipv6 есть не во всех версиях aiogram
+    if "use_ipv6" in inspect.signature(AiohttpSession).parameters:
+        session_kwargs["use_ipv6"] = False
+
+    session = AiohttpSession(**session_kwargs)
+
     bot = Bot(
         token=settings.bot_token,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
     dp = Dispatcher(storage=MemoryStorage())
 
-    # 🔴 ВАЖНО: гарантируем, что webhook выключен
+    # 🔴 Гарантируем, что webhook выключен
     await bot.delete_webhook(drop_pending_updates=True)
 
     # DI middleware
@@ -148,24 +162,25 @@ async def main() -> None:
     )
     scheduler.start()
 
-    logger.info("Starting polling (Railway safe mode)")
+    logger.info("Starting polling (Railway / local safe mode)")
 
     try:
         await dp.start_polling(
             bot,
-            polling_timeout=10,               # 🔴 КЛЮЧЕВАЯ ПРАВКА
+            polling_timeout=10,
             allowed_updates=[
                 "message",
                 "callback_query",
                 "edited_message",
-            ],                                # 🔴 уменьшаем нагрузку
-            handle_signals=False,             # 🔴 важно для Railway
+            ],
+            handle_signals=False,
         )
     finally:
         scheduler.shutdown(wait=False)
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
+        await session.close()
 
 
 if __name__ == "__main__":
