@@ -104,13 +104,14 @@ app = FastAPI()
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
+    logger.info("📩 Incoming webhook")
     update = await request.json()
     await app.state.dp.feed_raw_update(app.state.bot, update)
     return {"ok": True}
 
 
 # --------------------------------------------------
-# MAIN
+# STARTUP / SHUTDOWN
 # --------------------------------------------------
 
 async def startup() -> None:
@@ -124,7 +125,6 @@ async def startup() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Middleware
     dp.update.middleware(
         DependencyMiddleware(
             product_service=deps["product_service"],
@@ -135,17 +135,17 @@ async def startup() -> None:
         )
     )
 
-    # Routers
     dp.include_router(start.router)
     dp.include_router(buy.router)
     dp.include_router(order.router)
     dp.include_router(admin.router)
 
-    # Attach to FastAPI
+    # 🔴 ВАЖНО
+    await dp.startup(bot)
+
     app.state.bot = bot
     app.state.dp = dp
 
-    # Scheduler
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         promo_tick,
@@ -161,7 +161,6 @@ async def startup() -> None:
     scheduler.start()
     app.state.scheduler = scheduler
 
-    # Background cache updater
     cache_task = asyncio.create_task(
         deps["product_service"].background_updater(
             settings.cache_update_interval_minutes
@@ -169,7 +168,6 @@ async def startup() -> None:
     )
     app.state.cache_task = cache_task
 
-    # Webhook (only on Railway / prod)
     webhook_base_url = os.getenv("WEBHOOK_BASE_URL")
     if webhook_base_url:
         webhook_url = f"{webhook_base_url}/webhook"
@@ -187,6 +185,11 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    dp = getattr(app.state, "dp", None)
+    bot = getattr(app.state, "bot", None)
+    if dp and bot:
+        await dp.shutdown(bot)
+
     scheduler = getattr(app.state, "scheduler", None)
     if scheduler:
         scheduler.shutdown(wait=False)
@@ -203,10 +206,9 @@ async def on_shutdown():
 # --------------------------------------------------
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=port,
+        port=int(os.getenv("PORT", "8000")),
         log_level="info",
     )
