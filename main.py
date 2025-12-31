@@ -1,4 +1,4 @@
-"""Main entrypoint for the Telegram bot (Webhook + Railway, SAFE)."""
+"""Main entrypoint for the Telegram bot (Webhook + Railway, FINAL)."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,7 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession  # ✅ ВАЖНО
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
@@ -49,13 +49,13 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 
-# ✅ HEALTHCHECK (ОБЯЗАТЕЛЬНО ДЛЯ RAILWAY)
+# ✅ Healthcheck (Railway)
 @app.get("/")
 async def health():
     return {"status": "ok"}
 
 
-# ✅ TELEGRAM WEBHOOK
+# ✅ Telegram webhook
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     logger.info("📩 Webhook received from Telegram")
@@ -73,10 +73,7 @@ async def telegram_webhook(request: Request):
 async def on_startup():
     settings = get_settings()
 
-    # 🔥 КРИТИЧЕСКАЯ ЧАСТЬ — HTTP SESSION
-    session = AiohttpSession(
-        timeout=30,  # ⬅️ решает TelegramNetworkError на Railway
-    )
+    session = AiohttpSession(timeout=30)
 
     bot = Bot(
         token=settings.bot_token,
@@ -116,7 +113,6 @@ async def on_startup():
     )
     settings_service = SettingsService(settings.customers_db_path)
 
-    # ---- MIDDLEWARE ----
     dp.update.middleware(
         DependencyMiddleware(
             product_service=product_service,
@@ -127,7 +123,6 @@ async def on_startup():
         )
     )
 
-    # ---- ROUTERS ----
     dp.include_router(start.router)
     dp.include_router(buy.router)
     dp.include_router(order.router)
@@ -136,7 +131,7 @@ async def on_startup():
     app.state.bot = bot
     app.state.dp = dp
 
-    # ---- SCHEDULER ----
+    # ---- Scheduler ----
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         promo_tick,
@@ -147,7 +142,7 @@ async def on_startup():
     scheduler.start()
     app.state.scheduler = scheduler
 
-    # ---- CACHE ----
+    # ---- Cache ----
     cache_task = asyncio.create_task(
         product_service.background_updater(
             settings.cache_update_interval_minutes
@@ -155,7 +150,16 @@ async def on_startup():
     )
     app.state.cache_task = cache_task
 
-    logger.info("✅ Application startup completed")
+    # 🔥 ГЛАВНОЕ — гарантируем webhook
+    webhook_base = os.getenv("WEBHOOK_BASE_URL")
+    if not webhook_base:
+        raise RuntimeError("WEBHOOK_BASE_URL is not set")
+
+    webhook_url = f"{webhook_base}/webhook"
+    await bot.set_webhook(webhook_url)
+    logger.info("✅ Webhook set to %s", webhook_url)
+
+    logger.info("✅ Startup completed")
 
 
 # --------------------------------------------------
@@ -174,7 +178,7 @@ async def on_shutdown():
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
 
-    logger.info("🛑 Application shutdown completed")
+    logger.info("🛑 Shutdown completed")
 
 
 # --------------------------------------------------
