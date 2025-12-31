@@ -42,9 +42,9 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
         root.removeHandler(handler)
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    ))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
 
     root.addHandler(handler)
 
@@ -113,7 +113,7 @@ async def telegram_webhook(request: Request):
 # MAIN
 # --------------------------------------------------
 
-async def main() -> None:
+async def startup() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
 
@@ -159,6 +159,7 @@ async def main() -> None:
         ),
     )
     scheduler.start()
+    app.state.scheduler = scheduler
 
     # Background cache updater
     cache_task = asyncio.create_task(
@@ -166,44 +167,46 @@ async def main() -> None:
             settings.cache_update_interval_minutes
         )
     )
+    app.state.cache_task = cache_task
 
-    # --------------------------------------------------
-    # WEBHOOK (enabled only if env var exists)
-    # --------------------------------------------------
-
+    # Webhook (only on Railway / prod)
     webhook_base_url = os.getenv("WEBHOOK_BASE_URL")
-
     if webhook_base_url:
         webhook_url = f"{webhook_base_url}/webhook"
-
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(webhook_url)
-
         logger.info("Webhook set to %s", webhook_url)
     else:
-        logger.info("WEBHOOK_BASE_URL not set — local mode (webhook disabled)")
+        logger.info("WEBHOOK_BASE_URL not set — local mode")
 
-    # --------------------------------------------------
-    # RUN SERVER
-    # --------------------------------------------------
 
-    port = int(os.getenv("PORT", "8000"))
-    config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-    )
-    server = uvicorn.Server(config)
+@app.on_event("startup")
+async def on_startup():
+    await startup()
 
-    try:
-        await server.serve()
-    finally:
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    scheduler = getattr(app.state, "scheduler", None)
+    if scheduler:
         scheduler.shutdown(wait=False)
+
+    cache_task = getattr(app.state, "cache_task", None)
+    if cache_task:
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
 
 
+# --------------------------------------------------
+# ENTRYPOINT
+# --------------------------------------------------
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
