@@ -10,7 +10,6 @@ import os
 import sys
 import socket
 
-import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -47,13 +46,33 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------
+# FORCE IPv4 (Railway / broken IPv6 egress fix)
+# --------------------------------------------------
+
+_ORIG_GETADDRINFO = socket.getaddrinfo
+
+
+def force_ipv4_dns() -> None:
+    """
+    Forces DNS resolution to prefer IPv4 only.
+    This is useful when IPv6 exists but doesn't work reliably (timeouts to Telegram).
+    """
+
+    def _getaddrinfo_ipv4_first(host, port, family=0, type=0, proto=0, flags=0):
+        infos = _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
+        ipv4_infos = [i for i in infos if i[0] == socket.AF_INET]
+        return ipv4_infos or infos
+
+    socket.getaddrinfo = _getaddrinfo_ipv4_first
+
+
+# --------------------------------------------------
 # FASTAPI APP
 # --------------------------------------------------
 
 app = FastAPI()
 
 
-# ✅ Healthcheck (Railway)
 @app.get("/")
 async def health():
     return {"status": "ok"}
@@ -64,12 +83,9 @@ async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.model_validate(data)
 
-    # 🔥 НЕ ЖДЁМ ОБРАБОТКУ UPDATE
-    asyncio.create_task(
-        app.state.dp.feed_update(app.state.bot, update)
-    )
+    # НЕ ЖДЁМ ОБРАБОТКУ (быстрый ответ Telegram)
+    asyncio.create_task(app.state.dp.feed_update(app.state.bot, update))
 
-    # ⚡ МГНОВЕННЫЙ ОТВЕТ TELEGRAM
     return {"ok": True}
 
 
@@ -81,17 +97,12 @@ async def telegram_webhook(request: Request):
 async def on_startup():
     settings = get_settings()
 
-    # --- aiohttp session (FORCE IPv4, Railway fix) ---
-    connector = aiohttp.TCPConnector(
-        family=socket.AF_INET  # ⬅️ ЖЁСТКО IPv4
-    )
+    # ✅ fix before creating aiohttp session inside aiogram
+    force_ipv4_dns()
 
-    client_session = aiohttp.ClientSession(
-        connector=connector,
-        timeout=aiohttp.ClientTimeout(total=30),
-    )
-
-    session = AiohttpSession(client_session=client_session)
+    # В твоей версии aiogram нельзя прокинуть connector/client_session,
+    # поэтому используем обычный AiohttpSession + IPv4 DNS force.
+    session = AiohttpSession(timeout=30)
 
     bot = Bot(
         token=settings.bot_token,
@@ -153,10 +164,8 @@ async def on_startup():
     dp.include_router(order.router)
     dp.include_router(admin.router)
 
-    # ---- STORE IN APP STATE ----
     app.state.bot = bot
     app.state.dp = dp
-    app.state.client_session = client_session
 
     # ---- SCHEDULER ----
     scheduler = AsyncIOScheduler()
@@ -171,9 +180,7 @@ async def on_startup():
 
     # ---- CACHE ----
     cache_task = asyncio.create_task(
-        product_service.background_updater(
-            settings.cache_update_interval_minutes
-        )
+        product_service.background_updater(settings.cache_update_interval_minutes)
     )
     app.state.cache_task = cache_task
 
@@ -212,9 +219,11 @@ async def on_shutdown():
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
 
-    client_session = getattr(app.state, "client_session", None)
-    if client_session:
-        await client_session.close()
+    # ✅ close aiogram session (important)
+    bot = getattr(app.state, "bot", None)
+    if bot:
+        with contextlib.suppress(Exception):
+            await bot.session.close()
 
     logger.info("🛑 Shutdown completed")
 
