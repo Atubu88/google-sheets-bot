@@ -13,8 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Typed configuration for the application."""
 
+    """Typed configuration for the application."""
+    port: int = Field(8000, validation_alias="PORT")
     bot_token: str = Field(..., validation_alias="BOT_TOKEN")
     spreadsheet_id: str = Field(..., validation_alias="GOOGLE_SHEETS_ID")
     worksheet_name: str = Field("products", validation_alias="GOOGLE_SHEET_NAME")

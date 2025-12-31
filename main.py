@@ -186,8 +186,13 @@ async def on_startup():
 
     # ---- WEBHOOK (NON-BLOCKING) ----
     webhook_base = os.getenv("WEBHOOK_BASE_URL")
+
     if not webhook_base:
-        raise RuntimeError("WEBHOOK_BASE_URL is not set")
+        raise RuntimeError(
+            "WEBHOOK_BASE_URL is not set. "
+            "This entrypoint is for PROD only. "
+            "Use main_polling.py for local development."
+        )
 
     webhook_url = f"{webhook_base}/webhook"
 
@@ -203,7 +208,7 @@ async def on_startup():
     logger.info("✅ Startup completed")
 
 
-# --------------------------------------------------
+# -------------------------------------------------
 # SHUTDOWN
 # --------------------------------------------------
 

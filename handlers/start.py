@@ -17,7 +17,9 @@ from handlers.buy import (
 )
 from services.product_service import ProductService, Product
 from services.user_service import UserService
+import logging
 
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -53,8 +55,10 @@ async def start_handler(
                     first_name=user.first_name,
                     created_at=datetime.now(timezone.utc),
                 )
-            except Exception:
-                pass  # важно: не роняем webhook
+            except Exception as e:
+                logger.warning("Failed to save user: %s", e)
+
+        # важно: не роняем webhook
 
         asyncio.create_task(safe_save())
 
