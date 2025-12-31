@@ -1,4 +1,6 @@
-"""Main entrypoint for the Telegram bot (Webhook + Railway, STABLE)."""
+"""
+Main entrypoint for the Telegram bot (Webhook + Railway, STABLE).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +9,8 @@ import logging
 import os
 import sys
 import socket
+
+import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -60,14 +64,13 @@ async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.model_validate(data)
 
-    # 🔥 НЕ ЖДЁМ ОБРАБОТКУ
+    # 🔥 НЕ ЖДЁМ ОБРАБОТКУ UPDATE
     asyncio.create_task(
         app.state.dp.feed_update(app.state.bot, update)
     )
 
     # ⚡ МГНОВЕННЫЙ ОТВЕТ TELEGRAM
     return {"ok": True}
-
 
 
 # --------------------------------------------------
@@ -78,18 +81,17 @@ async def telegram_webhook(request: Request):
 async def on_startup():
     settings = get_settings()
 
-    import socket
-    import aiohttp
-    from aiogram.client.session.aiohttp import AiohttpSession
-
+    # --- aiohttp session (FORCE IPv4, Railway fix) ---
     connector = aiohttp.TCPConnector(
         family=socket.AF_INET  # ⬅️ ЖЁСТКО IPv4
     )
 
-    session = AiohttpSession(
-        timeout=30,
+    client_session = aiohttp.ClientSession(
         connector=connector,
+        timeout=aiohttp.ClientTimeout(total=30),
     )
+
+    session = AiohttpSession(client_session=client_session)
 
     bot = Bot(
         token=settings.bot_token,
@@ -151,8 +153,10 @@ async def on_startup():
     dp.include_router(order.router)
     dp.include_router(admin.router)
 
+    # ---- STORE IN APP STATE ----
     app.state.bot = bot
     app.state.dp = dp
+    app.state.client_session = client_session
 
     # ---- SCHEDULER ----
     scheduler = AsyncIOScheduler()
@@ -175,7 +179,6 @@ async def on_startup():
 
     # ---- WEBHOOK (NON-BLOCKING) ----
     webhook_base = os.getenv("WEBHOOK_BASE_URL")
-
     if not webhook_base:
         raise RuntimeError("WEBHOOK_BASE_URL is not set")
 
@@ -208,6 +211,10 @@ async def on_shutdown():
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
+
+    client_session = getattr(app.state, "client_session", None)
+    if client_session:
+        await client_session.close()
 
     logger.info("🛑 Shutdown completed")
 
