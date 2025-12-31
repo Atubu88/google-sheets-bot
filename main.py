@@ -5,11 +5,9 @@ import asyncio
 import contextlib
 import logging
 import sys
-import inspect  # 🔴 ВАЖНО
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -29,14 +27,15 @@ from services.settings_service import SettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
 
-
 def configure_logging(level: int = logging.INFO) -> logging.Logger:
     root = logging.getLogger()
     root.setLevel(level)
 
+    # Удаляем любые старые хендлеры, чтобы избежать дублирования и конфликтов
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
+    # Создаём handler, который пишет в stdout
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -44,6 +43,7 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
     root.addHandler(handler)
 
+    # Настраиваем уровни библиотек
     logging.getLogger("aiogram").setLevel(level)
     logging.getLogger("aiohttp").setLevel(level)
 
@@ -52,7 +52,6 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
 def build_dependencies() -> dict[str, object]:
     settings = get_settings()
-
     product_sheets_client = SheetsClient(
         service_account_file=settings.service_account_file,
         spreadsheet_id=settings.spreadsheet_id,
@@ -66,14 +65,12 @@ def build_dependencies() -> dict[str, object]:
 
     product_service = ProductService(product_sheets_client)
     user_service = UserService(user_sheets_client)
-
     promo_settings_client = SheetsClient(
         service_account_file=settings.service_account_file,
         spreadsheet_id=settings.spreadsheet_id,
         worksheet_name=settings.promo_settings_worksheet,
     )
     promo_settings_service = PromoSettingsService(promo_settings_client)
-
     customer_service = CustomerService(settings.customers_db_path)
     crm_client = LPCRMClient(
         api_key=settings.crm_api_key,
@@ -81,7 +78,6 @@ def build_dependencies() -> dict[str, object]:
         office_id=settings.crm_office_id,
     )
     settings_service = SettingsService(settings.customers_db_path)
-
     return {
         "settings": settings,
         "product_service": product_service,
@@ -92,14 +88,11 @@ def build_dependencies() -> dict[str, object]:
         "settings_service": settings_service,
     }
 
-
 logger = configure_logging()
-
 
 async def main() -> None:
     deps = build_dependencies()
     settings = deps["settings"]
-
     product_service = deps["product_service"]
     user_service = deps["user_service"]
     promo_settings_service = deps["promo_settings_service"]
@@ -107,38 +100,21 @@ async def main() -> None:
     crm_client = deps["crm_client"]
     settings_service = deps["settings_service"]
 
-    # 🔴 КРОСС-СОВМЕСТИМЫЙ HTTP SESSION
-    session_kwargs = {
-        "timeout": 20,
-    }
-
-    # use_ipv6 есть не во всех версиях aiogram
-    if "use_ipv6" in inspect.signature(AiohttpSession).parameters:
-        session_kwargs["use_ipv6"] = False
-
-    session = AiohttpSession(**session_kwargs)
-
     bot = Bot(
         token=settings.bot_token,
-        session=session,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
     dp = Dispatcher(storage=MemoryStorage())
 
-    # 🔴 Гарантируем, что webhook выключен
-    await bot.delete_webhook(drop_pending_updates=True)
-
     # DI middleware
-    dp.update.middleware(
-        DependencyMiddleware(
-            product_service=product_service,
-            user_service=user_service,
-            customer_service=customer_service,
-            crm_client=crm_client,
-            settings_service=settings_service,
-        )
-    )
+    dp.update.middleware(DependencyMiddleware(
+        product_service=product_service,
+        user_service=user_service,
+        customer_service=customer_service,
+        crm_client=crm_client,
+        settings_service=settings_service,
+    ))
 
     dp.include_router(start.router)
     dp.include_router(buy.router)
@@ -152,7 +128,7 @@ async def main() -> None:
         )
     )
 
-    logger.info("Starting scheduler")
+    logger.info("Starting bot")
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         promo_tick,
@@ -161,26 +137,13 @@ async def main() -> None:
         args=(bot, product_service, user_service, promo_settings_service),
     )
     scheduler.start()
-
-    logger.info("Starting polling (Railway / local safe mode)")
-
     try:
-        await dp.start_polling(
-            bot,
-            polling_timeout=10,
-            allowed_updates=[
-                "message",
-                "callback_query",
-                "edited_message",
-            ],
-            handle_signals=False,
-        )
+        await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)
         cache_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cache_task
-        await session.close()
 
 
 if __name__ == "__main__":
