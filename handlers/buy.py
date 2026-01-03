@@ -97,14 +97,19 @@ def build_price_block(price: str, old_price: str | None) -> str:
 
 def build_product_caption(product: Product) -> str:
     description_link = _build_description_link(product.description)
+    short_desc = product.short_desc.strip()
     lines: list[str] = [f"<b>{product.name}</b>", ""]
 
-    if description_link:
-        short_desc = product.short_desc.strip()
-        if short_desc:
+    if short_desc:
+        if description_link:
             lines.append(f"{short_desc} {description_link}")
         else:
-            lines.append(f"📖 {description_link}")
+            lines.append(short_desc)
+
+    if not short_desc and description_link:
+        lines.append(f"📖 {description_link}")
+
+    if short_desc or description_link:
         lines.append("")
 
     lines.append(build_price_block(product.price, product.old_price))
