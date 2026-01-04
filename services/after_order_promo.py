@@ -4,7 +4,7 @@ from pathlib import Path
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 # === НАСТРОЙКИ (просто и явно) ===
-GROUP_URL = "https://t.me/your_group"   # ← сюда вставишь ссылку
+GROUP_URL = "https://t.me/+F8ivhml73T8zZWUy"   # ← сюда вставишь ссылку
 IMAGE_NAME = "after_order_promo.jpg"
 
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
