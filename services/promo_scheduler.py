@@ -37,6 +37,29 @@ async def _send_products_to_chat(bot: Bot, chat_id: int, products) -> None:
         remember_product_card(chat_id, product, message.message_id)
 
 
+async def _send_products_with_retry(
+    bot: Bot,
+    chat_id: int,
+    products,
+    max_attempts: int = 2,
+) -> bool:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            await _send_products_to_chat(bot, chat_id, products)
+            return True
+        except Exception:
+            logger.warning(
+                "Promo send failed (chat_id=%s, attempt=%s/%s)",
+                chat_id,
+                attempt,
+                max_attempts,
+                exc_info=True,
+            )
+            if attempt < max_attempts:
+                await asyncio.sleep(0.5)
+    return False
+
+
 async def broadcast_promo(
     bot: Bot,
     product_service: ProductService,
@@ -75,19 +98,14 @@ async def broadcast_promo(
     logger.info("Starting promo broadcast to %s chats", len(chat_ids))
 
     send_tasks = [
-        _send_products_to_chat(bot, chat_id, products) for chat_id in chat_ids
+        _send_products_with_retry(bot, chat_id, products) for chat_id in chat_ids
     ]
 
-    results = await asyncio.gather(*send_tasks, return_exceptions=True)
-    failures = [result for result in results if isinstance(result, Exception)]
+    results = await asyncio.gather(*send_tasks)
+    failures = sum(1 for ok in results if not ok)
 
     if failures:
-        logger.warning("Promo broadcast finished with %s failures", len(failures))
-        return PromoBroadcastResult(
-            status="error",
-            chats=len(chat_ids),
-            products=len(products),
-        )
+        logger.warning("Promo broadcast finished with %s failures", failures)
 
     logger.info("Promo broadcast finished successfully")
     return PromoBroadcastResult(
