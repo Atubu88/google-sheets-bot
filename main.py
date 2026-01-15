@@ -21,7 +21,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request
 
 from config import get_settings
-from handlers import buy, order, start, admin
+from handlers import buy, order, start, admin, events
 from middlewares.deps import DependencyMiddleware
 from services.crm_client import LPCRMClient
 from services.customer_service import CustomerService
@@ -163,6 +163,7 @@ async def on_startup():
     dp.include_router(buy.router)
     dp.include_router(order.router)
     dp.include_router(admin.router)
+    dp.include_router(events.router)
 
     app.state.bot = bot
     app.state.dp = dp

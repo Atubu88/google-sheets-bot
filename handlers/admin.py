@@ -48,3 +48,16 @@ async def send_promo(
         return
 
     await message.answer("❌ Помилка під час промо-розсилки")
+
+
+@router.message(Command("stats"))
+async def show_stats(message: Message, user_service: UserService) -> None:
+    """Display user statistics."""
+
+    stats = await user_service.get_statistics()
+    await message.answer(
+        "📊 Статистика користувачів\n"
+        f"Всього: {stats['total']}\n"
+        f"Активні: {stats['active']}\n"
+        f"Відписались: {stats['left']}"
+    )

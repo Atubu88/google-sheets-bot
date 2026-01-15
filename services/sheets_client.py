@@ -115,6 +115,27 @@ class SheetsClient:
             return raw_rows[1:]
         return raw_rows
 
+    async def find_row_index(self, column_index: int, value: str) -> int | None:
+        """Find the row index for a value in the specified column.
+
+        Args:
+            column_index: 1-based column index to search.
+            value: Value to match in the column.
+
+        Returns:
+            The 1-based row index if found, otherwise ``None``.
+        """
+        worksheet = await self._get_worksheet()
+        try:
+            cell = await asyncio.to_thread(
+                worksheet.find,
+                str(value),
+                in_column=column_index,
+            )
+        except gspread.CellNotFound:
+            return None
+        return cell.row
+
     async def append_row(self, values: Sequence[str]) -> None:
         """Append a row to the worksheet."""
         worksheet = await self._get_worksheet()
