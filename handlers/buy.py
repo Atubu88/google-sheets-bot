@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from services.product_service import Product, ProductService
+from services.safe_sender import SafeSender
 
 router = Router()
 
@@ -143,6 +144,7 @@ def get_selected_product(chat_id: int, message_id: int) -> Product | None:
 async def buy_product_callback(
     callback_query: CallbackQuery,
     product_service: ProductService,
+    safe_sender: SafeSender,
 ) -> None:
 
     if callback_query.message is None:
@@ -171,7 +173,7 @@ async def buy_product_callback(
         return
 
     # --- intro text ---
-    await callback_query.message.bot.send_message(
+    await safe_sender.send_message(
         chat_id=chat_id,
         text=(
             "🎉 Чудовий вибір!\n"
@@ -179,6 +181,7 @@ async def buy_product_callback(
             "Готові оформити замовлення? ⬇️"
         ),
         parse_mode="HTML",
+        user_id=callback_query.from_user.id if callback_query.from_user else None,
     )
 
     # --- banner or fallback ---
@@ -192,15 +195,17 @@ async def buy_product_callback(
     kb.button(text="❌ Скасувати", callback_data="cancel_order")
     kb.adjust(1)
 
-    new_msg = await callback_query.message.bot.send_photo(
+    new_msg = await safe_sender.send_photo(
         chat_id=chat_id,
         photo=photo,
         caption=caption,
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
+        user_id=callback_query.from_user.id if callback_query.from_user else None,
     )
 
-    remember_selected_product(chat_id, product, new_msg.message_id)
+    if new_msg:
+        remember_selected_product(chat_id, product, new_msg.message_id)
     await callback_query.answer()
 
 
@@ -208,6 +213,7 @@ async def buy_product_callback(
 async def cancel_order_callback(
     callback_query: CallbackQuery,
     product_service: ProductService,
+    safe_sender: SafeSender,
 ) -> None:
 
     if callback_query.message is None:
@@ -226,13 +232,15 @@ async def cancel_order_callback(
         pass
 
     for product in await product_service.get_products():
-        sent = await callback_query.message.bot.send_photo(
+        sent = await safe_sender.send_photo(
             chat_id=chat_id,
             photo=product.photo_url,
             caption=build_product_caption(product),
             parse_mode="HTML",
             reply_markup=_build_buy_keyboard(product),
+            user_id=callback_query.from_user.id if callback_query.from_user else None,
         )
-        remember_product_card(chat_id, product, sent.message_id)
+        if sent:
+            remember_product_card(chat_id, product, sent.message_id)
 
     await callback_query.answer()

@@ -28,6 +28,7 @@ from services.customer_service import CustomerService
 from services.product_service import ProductService
 from services.promo_scheduler import promo_tick
 from services.promo_settings_service import PromoSettingsService
+from services.safe_sender import SafeSender
 from services.settings_service import SettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
@@ -128,6 +129,7 @@ async def on_startup():
             settings.users_worksheet,
         )
     )
+    safe_sender = SafeSender(bot, user_service)
 
     promo_settings_service = PromoSettingsService(
         SheetsClient(
@@ -155,6 +157,7 @@ async def on_startup():
             customer_service=customer_service,
             crm_client=crm_client,
             settings_service=settings_service,
+            safe_sender=safe_sender,
         )
     )
 
@@ -173,7 +176,7 @@ async def on_startup():
         promo_tick,
         "interval",
         minutes=5,
-        args=(bot, product_service, user_service, promo_settings_service),
+        args=(safe_sender, product_service, user_service, promo_settings_service),
     )
     scheduler.start()
     app.state.scheduler = scheduler

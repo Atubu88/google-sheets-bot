@@ -16,6 +16,7 @@ from handlers.buy import (
     remember_welcome_message,
 )
 from services.product_service import ProductService, Product
+from services.safe_sender import SafeSender
 from services.user_service import UserService
 import logging
 
@@ -24,11 +25,16 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-async def _send_product_card(message: Message, product: Product) -> Message:
+async def _send_product_card(
+    message: Message,
+    product: Product,
+    safe_sender: SafeSender,
+) -> Message | None:
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Купити", callback_data=f"buy:{product.id}")
 
-    return await message.answer_photo(
+    return await safe_sender.answer_photo(
+        message,
         photo=product.photo_url,
         caption=build_product_caption(product),
         reply_markup=keyboard.as_markup(),
@@ -41,6 +47,7 @@ async def start_handler(
     message: Message,
     product_service: ProductService,
     user_service: UserService,
+    safe_sender: SafeSender,
 ) -> None:
     user = message.from_user
 
@@ -65,7 +72,8 @@ async def start_handler(
     name = user.first_name if user and user.first_name else ""
     name_part = f", {name}" if name else ""
 
-    welcome = await message.answer(
+    welcome = await safe_sender.answer(
+        message,
         f"""
 👋 Вітаємо{name_part}!
 Ми підготували для вас найкращі акції сьогодні.
@@ -73,14 +81,18 @@ async def start_handler(
         """.strip()
     )
 
-    remember_welcome_message(message.chat.id, welcome.message_id)
+    if welcome:
+        remember_welcome_message(message.chat.id, welcome.message_id)
 
     # 🔥 ВАЖНО: берём ТОЛЬКО из cache
     products = await product_service.get_products()
 
 
     if not products:
-        await message.answer("Наразі немає доступних товарів. Завітайте пізніше!")
+        await safe_sender.answer(
+            message,
+            "Наразі немає доступних товарів. Завітайте пізніше!",
+        )
         return
 
     await asyncio.sleep(1.0)
@@ -88,5 +100,6 @@ async def start_handler(
     reset_product_cards(message.chat.id)
 
     for product in products:
-        msg = await _send_product_card(message, product)
-        remember_product_card(message.chat.id, product, msg.message_id)
+        msg = await _send_product_card(message, product, safe_sender)
+        if msg:
+            remember_product_card(message.chat.id, product, msg.message_id)
