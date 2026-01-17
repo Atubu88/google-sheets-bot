@@ -133,6 +133,19 @@ class SheetsClient:
             value,
         )
 
+    async def find_row_index(self, column_index: int, value: str) -> int | None:
+        """Find a row index by value within a specific column."""
+        worksheet = await self._get_worksheet()
+
+        def _find_cell() -> gspread.Cell | None:
+            try:
+                return worksheet.find(str(value), in_column=column_index)
+            except gspread.exceptions.CellNotFound:
+                return None
+
+        cell = await asyncio.to_thread(_find_cell)
+        return cell.row if cell else None
+
     async def fetch_rows(self) -> List[SheetRow]:
         """Fetch all rows (excluding header) from the worksheet."""
         data_rows = await self.fetch_raw_rows(skip_header=True)

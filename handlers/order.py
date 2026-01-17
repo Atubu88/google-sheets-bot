@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aiogram import F, Router
@@ -30,6 +31,8 @@ from services.customer_service import CustomerService
 from services.crm_client import LPCRMClient
 from services.settings_service import SettingsService
 from services.after_order_promo import send_after_order_promo
+from services.safe_sender import SafeSender
+from services.user_service import UserService
 from utils.phone import normalize_ua_phone
 from pathlib import Path
 
@@ -171,7 +174,7 @@ async def update_step(
 
 
 async def notify_orders_group(
-    bot,
+    safe_sender: SafeSender,
     settings_service: SettingsService,
     *,
     name: str,
@@ -196,7 +199,7 @@ async def notify_orders_group(
     )
 
     try:
-        await bot.send_message(chat_id=int(orders_group_id), text=summary)
+        await safe_sender.send_message(chat_id=int(orders_group_id), text=summary)
     except Exception:
         logger.exception("Failed to send order summary to group %s", orders_group_id)
 
@@ -273,7 +276,19 @@ async def confirm_order_callback(
 # ===================== NAME =====================
 
 @router.message(OrderState.waiting_for_name, F.text)
-async def name_handler(message: Message, state: FSMContext):
+async def name_handler(
+    message: Message,
+    state: FSMContext,
+    user_service: UserService,
+):
+    if message.from_user:
+        await user_service.ensure_user_record(
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            created_at=datetime.now(timezone.utc),
+        )
     name = message.text.strip()
     if not name:
         return
@@ -295,19 +310,43 @@ async def name_handler(message: Message, state: FSMContext):
 # ===================== PHONE =====================
 
 @router.callback_query(F.data == "order:contact")
-async def phone_contact_request(callback: CallbackQuery, state: FSMContext):
+async def phone_contact_request(
+    callback: CallbackQuery,
+    state: FSMContext,
+    safe_sender: SafeSender,
+):
     kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Поділитися номером", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-    sent = await callback.message.answer("Надішліть контакт:", reply_markup=kb)
+    sent = await safe_sender.answer(
+        callback.message,
+        "Надішліть контакт:",
+        reply_markup=kb,
+        user_id=callback.from_user.id if callback.from_user else None,
+    )
+    if sent is None:
+        await callback.answer()
+        return
     await state.update_data(contact_prompt_id=sent.message_id)
     await callback.answer()
 
 
 @router.message(OrderState.waiting_for_phone, F.contact)
-async def phone_contact_handler(message: Message, state: FSMContext):
+async def phone_contact_handler(
+    message: Message,
+    state: FSMContext,
+    user_service: UserService,
+):
+    if message.from_user:
+        await user_service.ensure_user_record(
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            created_at=datetime.now(timezone.utc),
+        )
     await message.delete()
     data = await state.get_data()
 
@@ -324,7 +363,19 @@ async def phone_contact_handler(message: Message, state: FSMContext):
 
 
 @router.message(OrderState.waiting_for_phone, F.text)
-async def phone_text_handler(message: Message, state: FSMContext):
+async def phone_text_handler(
+    message: Message,
+    state: FSMContext,
+    user_service: UserService,
+):
+    if message.from_user:
+        await user_service.ensure_user_record(
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            created_at=datetime.now(timezone.utc),
+        )
     raw_phone = message.text.strip()
     phone = normalize_ua_phone(raw_phone)
 
@@ -353,7 +404,19 @@ async def phone_text_handler(message: Message, state: FSMContext):
 # ===================== CITY =====================
 
 @router.message(OrderState.waiting_for_city_branch, F.text)
-async def city_branch_handler(message: Message, state: FSMContext):
+async def city_branch_handler(
+    message: Message,
+    state: FSMContext,
+    user_service: UserService,
+):
+    if message.from_user:
+        await user_service.ensure_user_record(
+            user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            created_at=datetime.now(timezone.utc),
+        )
     await message.delete()
     await state.update_data(city_branch=message.text.strip())
     await state.set_state(OrderState.waiting_for_confirmation)
@@ -426,6 +489,7 @@ async def submit_order(
     customer_service: CustomerService,
     crm_client: LPCRMClient,
     settings_service: SettingsService,
+    safe_sender: SafeSender,
 ):
     data = await state.get_data()
     user = callback.from_user
@@ -472,7 +536,7 @@ async def submit_order(
         logger.exception("CRM error")
 
     await notify_orders_group(
-        callback.message.bot,
+        safe_sender,
         settings_service,
         name=data["name"],
         phone=data["phone"],
@@ -482,10 +546,15 @@ async def submit_order(
     )
 
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("✅ Замовлення успішно оформлено!")
+    await safe_sender.answer(
+        callback.message,
+        "✅ Замовлення успішно оформлено!",
+        user_id=callback.from_user.id if callback.from_user else None,
+    )
     await send_after_order_promo(
-        callback.message.bot,
+        safe_sender,
         callback.message.chat.id,
+        user_id=callback.from_user.id if callback.from_user else callback.message.chat.id,
     )
     await state.clear()
     await callback.answer()
@@ -499,9 +568,10 @@ async def cancel_order(
     callback: CallbackQuery,
     state: FSMContext,
     product_service: ProductService,
+    safe_sender: SafeSender,
 ):
     await state.clear()
-    await cancel_order_callback(callback, product_service)
+    await cancel_order_callback(callback, product_service, safe_sender)
 
 
 @router.callback_query(F.data == "order:back:product")
@@ -562,6 +632,7 @@ async def confirm_existing_order(
     customer_service: CustomerService,
     crm_client: LPCRMClient,
     settings_service: SettingsService,
+    safe_sender: SafeSender,
 ):
     data = await state.get_data()
     customer = await customer_service.get_customer(callback.from_user.id)
@@ -593,7 +664,7 @@ async def confirm_existing_order(
     )
 
     await notify_orders_group(
-        callback.message.bot,
+        safe_sender,
         settings_service,
         name=customer["name"],
         phone=customer["phone"],
@@ -603,7 +674,11 @@ async def confirm_existing_order(
     )
 
     await callback.message.edit_reply_markup(None)
-    await callback.message.answer("✅ Замовлення успішно оформлено!")
+    await safe_sender.answer(
+        callback.message,
+        "✅ Замовлення успішно оформлено!",
+        user_id=callback.from_user.id if callback.from_user else None,
+    )
     await state.clear()
     await callback.answer()
 

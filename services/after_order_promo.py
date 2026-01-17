@@ -3,6 +3,8 @@ from pathlib import Path
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
+from services.safe_sender import SafeSender
+
 # === НАСТРОЙКИ (просто и явно) ===
 GROUP_URL = "https://t.me/+F8ivhml73T8zZWUy"   # ← сюда вставишь ссылку
 IMAGE_NAME = "after_order_promo.jpg"
@@ -10,7 +12,12 @@ IMAGE_NAME = "after_order_promo.jpg"
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
 
 
-async def send_after_order_promo(bot, chat_id: int) -> None:
+async def send_after_order_promo(
+    safe_sender: SafeSender,
+    chat_id: int,
+    *,
+    user_id: int,
+) -> None:
     """Send promo message with image and group link after order."""
 
     image_path = IMAGES_DIR / IMAGE_NAME
@@ -34,18 +41,20 @@ async def send_after_order_promo(bot, chat_id: int) -> None:
     )
 
     if image_path.exists():
-        await bot.send_photo(
+        await safe_sender.send_photo(
             chat_id=chat_id,
             photo=FSInputFile(image_path),
             caption=caption,
             parse_mode="HTML",
             reply_markup=keyboard,
+            user_id=user_id,
         )
     else:
         # fallback если фото вдруг пропало
-        await bot.send_message(
+        await safe_sender.send_message(
             chat_id=chat_id,
             text=caption,
             parse_mode="HTML",
             reply_markup=keyboard,
+            user_id=user_id,
         )

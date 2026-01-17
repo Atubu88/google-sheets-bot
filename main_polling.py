@@ -23,6 +23,7 @@ from services.customer_service import CustomerService
 from services.product_service import ProductService
 from services.promo_scheduler import promo_tick
 from services.promo_settings_service import PromoSettingsService
+from services.safe_sender import SafeSender
 from services.settings_service import SettingsService
 from services.sheets_client import SheetsClient
 from services.user_service import UserService
@@ -104,6 +105,7 @@ async def main() -> None:
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
+    safe_sender = SafeSender(bot, user_service)
 
     dp = Dispatcher(storage=MemoryStorage())
 
@@ -114,6 +116,7 @@ async def main() -> None:
         customer_service=customer_service,
         crm_client=crm_client,
         settings_service=settings_service,
+        safe_sender=safe_sender,
     ))
 
     dp.include_router(start.router)
@@ -134,7 +137,7 @@ async def main() -> None:
         promo_tick,
         "interval",
         hours=24,
-        args=(bot, product_service, user_service, promo_settings_service),
+        args=(safe_sender, product_service, user_service, promo_settings_service),
     )
     scheduler.start()
     try:

@@ -7,11 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot
-
 from handlers.buy import remember_product_card, reset_product_cards, _build_buy_keyboard, build_product_caption
 from services.product_service import ProductService
 from services.promo_settings_service import PromoSettingsService
+from services.safe_sender import SafeSender
 from services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -24,29 +23,39 @@ class PromoBroadcastResult:
     products: int
 
 
-async def _send_products_to_chat(bot: Bot, chat_id: int, products) -> None:
+async def _send_products_to_chat(
+    safe_sender: SafeSender,
+    chat_id: int,
+    products,
+) -> bool:
     reset_product_cards(chat_id)
     for product in products:
-        message = await bot.send_photo(
+        message = await safe_sender.send_photo(
             chat_id=chat_id,
             photo=product.photo_url,
             caption=build_product_caption(product),
             parse_mode="HTML",
             reply_markup=_build_buy_keyboard(product),
+            user_id=chat_id,
         )
+        if message is None:
+            return False
         remember_product_card(chat_id, product, message.message_id)
+    return True
 
 
 async def _send_products_with_retry(
-    bot: Bot,
+    safe_sender: SafeSender,
     chat_id: int,
     products,
     max_attempts: int = 2,
 ) -> bool:
     for attempt in range(1, max_attempts + 1):
         try:
-            await _send_products_to_chat(bot, chat_id, products)
-            return True
+            success = await _send_products_to_chat(safe_sender, chat_id, products)
+            if success:
+                return True
+            return False
         except Exception:
             logger.warning(
                 "Promo send failed (chat_id=%s, attempt=%s/%s)",
@@ -61,7 +70,7 @@ async def _send_products_with_retry(
 
 
 async def broadcast_promo(
-    bot: Bot,
+    safe_sender: SafeSender,
     product_service: ProductService,
     user_service: UserService,
 ) -> PromoBroadcastResult:
@@ -98,7 +107,8 @@ async def broadcast_promo(
     logger.info("Starting promo broadcast to %s chats", len(chat_ids))
 
     send_tasks = [
-        _send_products_with_retry(bot, chat_id, products) for chat_id in chat_ids
+        _send_products_with_retry(safe_sender, chat_id, products)
+        for chat_id in chat_ids
     ]
 
     results = await asyncio.gather(*send_tasks)
@@ -116,7 +126,7 @@ async def broadcast_promo(
 
 
 async def promo_tick(
-    bot: Bot,
+    safe_sender: SafeSender,
     product_service: ProductService,
     user_service: UserService,
     promo_settings_service: PromoSettingsService,
@@ -134,7 +144,7 @@ async def promo_tick(
     if not promo_settings_service.should_send_now(settings, now):
         return
 
-    result = await broadcast_promo(bot, product_service, user_service)
+    result = await broadcast_promo(safe_sender, product_service, user_service)
 
     if result.status != "sent":
         logger.info("Promo tick finished with status: %s", result.status)
