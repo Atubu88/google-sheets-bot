@@ -1,6 +1,7 @@
 """Service for working with Telegram users stored in Google Sheets."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -23,6 +24,61 @@ class UserService:
 
     def __init__(self, sheets_client: SheetsClient):
         self._sheets_client = sheets_client
+        self._row_index_cache: dict[str, int] | None = None
+        self._status_cache: dict[str, str] | None = None
+        self._last_row_index: int | None = None
+        self._cache_lock = asyncio.Lock()
+        self._user_locks: dict[str, asyncio.Lock] = {}
+        self._user_locks_lock = asyncio.Lock()
+
+    async def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        async with self._user_locks_lock:
+            lock = self._user_locks.get(user_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._user_locks[user_id] = lock
+            return lock
+
+    async def _ensure_row_index_cache(self) -> None:
+        if self._row_index_cache is not None:
+            return
+        async with self._cache_lock:
+            if self._row_index_cache is not None:
+                return
+            rows = await self._sheets_client.fetch_raw_rows(skip_header=False)
+            cache: dict[str, int] = {}
+            status_cache: dict[str, str] = {}
+            for idx, row in enumerate(rows, start=1):
+                if idx == 1:
+                    continue
+                if len(row) < USER_ID_COLUMN:
+                    continue
+                user_id = str(row[USER_ID_COLUMN - 1]).strip()
+                if not user_id:
+                    continue
+                cache[user_id] = idx
+                status_value = ""
+                if len(row) >= STATUS_COLUMN:
+                    status_value = str(row[STATUS_COLUMN - 1]).strip().lower()
+                status_cache[user_id] = status_value or "active"
+            self._row_index_cache = cache
+            self._status_cache = status_cache
+            self._last_row_index = len(rows)
+
+    async def _find_and_cache_row_index(self, user_id: int) -> int | None:
+        row_index = await self._sheets_client.find_row_index(
+            USER_ID_COLUMN,
+            str(user_id),
+        )
+        if row_index:
+            async with self._cache_lock:
+                if self._row_index_cache is not None:
+                    self._row_index_cache[str(user_id)] = row_index
+                    if self._last_row_index is None or row_index > self._last_row_index:
+                        self._last_row_index = row_index
+                if self._status_cache is not None:
+                    self._status_cache.setdefault(str(user_id), "active")
+        return row_index
 
     async def ensure_user_record(
         self,
@@ -47,13 +103,19 @@ class UserService:
         """
 
         user_id_str = str(user_id)
-        row_index = await self._sheets_client.find_row_index(
-            USER_ID_COLUMN,
-            user_id_str,
-        )
+        await self._ensure_row_index_cache()
+        row_index = self._row_index_cache.get(user_id_str) if self._row_index_cache else None
 
         if row_index:
-            await self._sheets_client.update_cell(row_index, STATUS_COLUMN, "active")
+            user_lock = await self._get_user_lock(user_id_str)
+            async with user_lock:
+                cached_status = self._status_cache.get(user_id_str) if self._status_cache else None
+                if cached_status == "active":
+                    return False
+                await self._sheets_client.update_cell(row_index, STATUS_COLUMN, "active")
+                async with self._cache_lock:
+                    if self._status_cache is not None:
+                        self._status_cache[user_id_str] = "active"
             return False
 
         await self._sheets_client.append_row(
@@ -66,6 +128,13 @@ class UserService:
                 "active",
             ]
         )
+        async with self._cache_lock:
+            if self._row_index_cache is not None:
+                next_row_index = (self._last_row_index or 0) + 1
+                self._row_index_cache[user_id_str] = next_row_index
+                self._last_row_index = next_row_index
+            if self._status_cache is not None:
+                self._status_cache[user_id_str] = "active"
         return True
 
     async def get_chat_ids(self) -> list[int]:
@@ -91,20 +160,28 @@ class UserService:
 
     async def update_status(self, user_id: int, is_active: bool) -> None:
         """Update user status in the worksheet."""
+        await self._ensure_row_index_cache()
+        user_id_str = str(user_id)
+        user_lock = await self._get_user_lock(user_id_str)
+        async with user_lock:
+            row_index = self._row_index_cache.get(user_id_str) if self._row_index_cache else None
+            if not row_index:
+                row_index = await self._find_and_cache_row_index(user_id)
+            if not row_index:
+                return
 
-        row_index = await self._sheets_client.find_row_index(
-            USER_ID_COLUMN,
-            str(user_id),
-        )
-        if not row_index:
-            return
-
-        status_value = "active" if is_active else "left"
-        await self._sheets_client.update_cell(
-            row_index,
-            STATUS_COLUMN,
-            status_value,
-        )
+            status_value = "active" if is_active else "left"
+            cached_status = self._status_cache.get(user_id_str) if self._status_cache else None
+            if cached_status == status_value:
+                return
+            await self._sheets_client.update_cell(
+                row_index,
+                STATUS_COLUMN,
+                status_value,
+            )
+            async with self._cache_lock:
+                if self._status_cache is not None:
+                    self._status_cache[user_id_str] = status_value
 
     async def get_statistics(self) -> UserStatistics:
         """Return total/active/left stats from the worksheet."""
