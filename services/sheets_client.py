@@ -59,6 +59,9 @@ class SheetsClient:
         self._spreadsheet_id = spreadsheet_id
         self._worksheet_name = worksheet_name
         self._client: gspread.Client | None = None
+        self._spreadsheet: gspread.Spreadsheet | None = None
+        self._worksheet: gspread.Worksheet | None = None
+        self._init_lock = asyncio.Lock()
 
     def _build_client(self) -> gspread.Client:
         scopes = [
@@ -83,17 +86,27 @@ class SheetsClient:
         return gspread.authorize(credentials)
 
     async def _get_worksheet(self) -> gspread.Worksheet:
-        if self._client is None:
-            self._client = await asyncio.to_thread(self._build_client)
+        if self._worksheet is not None:
+            return self._worksheet
 
-        spreadsheet = await asyncio.to_thread(
-            self._client.open_by_url,
-            f"https://docs.google.com/spreadsheets/d/{self._spreadsheet_id}",
-        )
-        return await asyncio.to_thread(
-            spreadsheet.worksheet,
-            self._worksheet_name,
-        )
+        async with self._init_lock:
+            if self._worksheet is not None:
+                return self._worksheet
+
+            if self._client is None:
+                self._client = await asyncio.to_thread(self._build_client)
+
+            if self._spreadsheet is None:
+                self._spreadsheet = await asyncio.to_thread(
+                    self._client.open_by_key,
+                    self._spreadsheet_id,
+                )
+
+            self._worksheet = await asyncio.to_thread(
+                self._spreadsheet.worksheet,
+                self._worksheet_name,
+            )
+            return self._worksheet
 
 
     async def fetch_raw_rows(self, *, skip_header: bool = True) -> list[list[str]]:
