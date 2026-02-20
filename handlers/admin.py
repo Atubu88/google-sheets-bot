@@ -46,12 +46,27 @@ async def send_promo(
         )
         return
 
+    if result.status == "sent_with_failures":
+        await safe_sender.answer(
+            message,
+            (
+                "⚠️ Промо-розсилку виконано з помилками "
+                f"(успішно: {result.success}, forbidden: {result.forbidden}, "
+                f"тимчасові: {result.temporary_errors}, постійні: {result.permanent_errors})"
+            ),
+        )
+        return
+
     if result.status == "no_products":
         await safe_sender.answer(message, "⚠️ Немає товарів для промо-розсилки")
         return
 
     if result.status == "no_chats":
         await safe_sender.answer(message, "⚠️ Немає користувачів для промо-розсилки")
+        return
+
+    if result.status == "busy":
+        await safe_sender.answer(message, "⏳ Розсилка вже виконується, спробуйте пізніше")
         return
 
     await safe_sender.answer(message, "❌ Помилка під час промо-розсилки")
